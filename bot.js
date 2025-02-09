@@ -2,50 +2,87 @@ const { Telegraf } = require('telegraf');
 const schedule = require('node-schedule');
 const dotenv = require('dotenv');
 
-dotenv.config(); // Загружаем переменные из .env
+dotenv.config();
 
-// ==== Настройки ====
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID; // Например, "@yourchannel"
-const ADMIN_ID = Number(process.env.ADMIN_ID); // ID администратора
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const ADMIN_ID = Number(process.env.ADMIN_ID);
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Очередь постов хранится в памяти
-// posts — массив готовых для отправки постов
-// groups — временное хранилище для альбомных сообщений, ключ — media_group_id
-// groupTimers — таймеры для групп, по которым через заданное время считается, что альбом завершён
 let queue = {
 	posts: [],
 	groups: {},
 };
 let groupTimers = {};
 
-// Обработчик входящих сообщений от администратора
 bot.on('message', async (ctx) => {
-	// Обрабатываем только сообщения от администратора
 	if (ctx.chat.id !== ADMIN_ID) return;
 
 	const caption = ctx.message.caption || '';
 
-	// Если сообщение является частью альбома (имеет media_group_id)
+	// Обработка текстовых сообщений
+	if (
+		ctx.message.text &&
+		!ctx.message.photo &&
+		!ctx.message.video &&
+		!ctx.message.animation &&
+		!ctx.message.sticker &&
+		!ctx.message.poll &&
+		!ctx.message.audio &&
+		!ctx.message.document &&
+		!ctx.message.location &&
+		!ctx.message.contact &&
+		!ctx.message.venue &&
+		!ctx.message.video_note &&
+		!ctx.message.voice &&
+		!ctx.message.media_group_id
+	) {
+		queue.posts.push({
+			type: 'text',
+			content: ctx.message.text,
+			chatId: ctx.chat.id,
+			messageId: ctx.message.message_id,
+		});
+		return ctx.reply(
+			`✅ Текст добавлен в очередь! Всего постов: ${queue.posts.length}`
+		);
+	}
+
+	// Обработка опросов
+	if (ctx.message.poll) {
+		const poll = ctx.message.poll;
+		queue.posts.push({
+			type: 'poll',
+			question: poll.question,
+			options: poll.options.map((option) => option.text),
+			isAnonymous: poll.is_anonymous,
+			allowsMultipleAnswers: poll.allows_multiple_answers,
+			chatId: ctx.chat.id,
+			messageId: ctx.message.message_id,
+		});
+		return ctx.reply(
+			`✅ Опрос добавлен в очередь! Всего постов: ${queue.posts.length}`
+		);
+	}
+
+	// Обработка медиа-групп (альбомов)
 	if (ctx.message.media_group_id) {
 		const groupId = ctx.message.media_group_id;
-		// Если это первое сообщение альбома — создаём объект для группы
+
 		if (!queue.groups[groupId]) {
 			queue.groups[groupId] = {
 				media: [],
 				chatId: ctx.chat.id,
-				// Сохраним ID первого сообщения альбома (для последующего удаления)
-				messageId: ctx.message.message_id,
+				messageIds: [],
 			};
 		}
-		// Добавляем медиа: для фото берем изображение наилучшего качества
+
+		queue.groups[groupId].messageIds.push(ctx.message.message_id);
+
 		if (ctx.message.photo) {
-			queue.groups[groupId].media.push({
-				type: 'photo',
-				media: ctx.message.photo.pop().file_id,
-			});
+			const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+			queue.groups[groupId].media.push({ type: 'photo', media: fileId });
 		}
 		if (ctx.message.video) {
 			queue.groups[groupId].media.push({
@@ -53,108 +90,286 @@ bot.on('message', async (ctx) => {
 				media: ctx.message.video.file_id,
 			});
 		}
-
-		// Если в одном из сообщений альбома появилась подпись, считаем альбом завершённым
-		if (caption) {
-			// Если ранее был установлен таймер — отменяем его
-			if (groupTimers[groupId]) {
-				clearTimeout(groupTimers[groupId]);
-				delete groupTimers[groupId];
-			}
-			// Добавляем альбом в очередь с подписью
-			queue.posts.push({
-				media: queue.groups[groupId].media,
-				caption: caption,
-				chatId: queue.groups[groupId].chatId,
-				messageId: queue.groups[groupId].messageId,
+		if (ctx.message.animation) {
+			queue.groups[groupId].media.push({
+				type: 'animation',
+				media: ctx.message.animation.file_id,
 			});
-			delete queue.groups[groupId];
-			return ctx.reply(
-				`✅ Альбом добавлен в очередь! Всего постов: ${queue.posts.length}`
-			);
-		} else {
-			// Если подписи нет — устанавливаем таймер (если ещё не установлен)
-			if (!groupTimers[groupId]) {
-				groupTimers[groupId] = setTimeout(() => {
-					if (queue.groups[groupId]) {
-						queue.posts.push({
-							media: queue.groups[groupId].media,
-							caption: '', // пустая подпись
-							chatId: queue.groups[groupId].chatId,
-							messageId: queue.groups[groupId].messageId,
-						});
-						delete queue.groups[groupId];
-						delete groupTimers[groupId];
-						console.log(
-							`✅ Альбом (без подписи) добавлен в очередь! Всего постов: ${queue.posts.length}`
-						);
-					}
-				}, 5000); // ждем 5 секунд
-			}
-			// Не отправляем сразу ответ — дождемся таймера
-			return;
 		}
+		if (ctx.message.sticker) {
+			queue.groups[groupId].media.push({
+				type: 'sticker',
+				media: ctx.message.sticker.file_id,
+			});
+		}
+		if (ctx.message.audio) {
+			queue.groups[groupId].media.push({
+				type: 'audio',
+				media: ctx.message.audio.file_id,
+			});
+		}
+		if (ctx.message.document) {
+			queue.groups[groupId].media.push({
+				type: 'document',
+				media: ctx.message.document.file_id,
+			});
+		}
+		if (ctx.message.video_note) {
+			queue.groups[groupId].media.push({
+				type: 'video_note',
+				media: ctx.message.video_note.file_id,
+			});
+		}
+
+		if (ctx.message.voice) {
+			queue.groups[groupId].media.push({
+				type: 'voice',
+				media: ctx.message.voice.file_id,
+			});
+		}
+		if (!groupTimers[groupId]) {
+			groupTimers[groupId] = setTimeout(async () => {
+				if (queue.groups[groupId]) {
+					queue.posts.push({
+						type: 'media_group',
+						media: queue.groups[groupId].media,
+						caption,
+						chatId: queue.groups[groupId].chatId,
+						messageIds: queue.groups[groupId].messageIds,
+					});
+					delete queue.groups[groupId];
+					delete groupTimers[groupId];
+					await bot.telegram.sendMessage(
+						ADMIN_ID,
+						`✅ Альбом добавлен в очередь! Всего постов: ${queue.posts.length}`
+					);
+				}
+			}, 5000);
+		}
+		return;
 	}
 
-	// Если сообщение не является частью альбома — обрабатываем одиночное фото/видео
+	// Обработка одиночных медиа-сообщений
 	const media = [];
 	if (ctx.message.photo) {
-		media.push({ type: 'photo', media: ctx.message.photo.pop().file_id });
+		const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+		media.push({ type: 'photo', media: fileId });
 	}
 	if (ctx.message.video) {
 		media.push({ type: 'video', media: ctx.message.video.file_id });
 	}
+	if (ctx.message.animation) {
+		media.push({ type: 'animation', media: ctx.message.animation.file_id });
+	}
+	if (ctx.message.sticker) {
+		media.push({ type: 'sticker', media: ctx.message.sticker.file_id });
+	}
+	if (ctx.message.audio) {
+		media.push({ type: 'audio', media: ctx.message.audio.file_id });
+	}
+	if (ctx.message.document) {
+		media.push({ type: 'document', media: ctx.message.document.file_id });
+	}
+	if (ctx.message.video_note) {
+		media.push({ type: 'video_note', media: ctx.message.video_note.file_id });
+	}
+	if (ctx.message.voice) {
+		media.push({ type: 'voice', media: ctx.message.voice.file_id });
+	}
+
 	if (media.length > 0) {
 		queue.posts.push({
+			type: 'media',
 			media,
 			caption,
 			chatId: ctx.chat.id,
 			messageId: ctx.message.message_id,
 		});
 		return ctx.reply(
-			`✅ Добавлено в очередь! Всего постов: ${queue.posts.length}`
+			`✅ Медиа добавлено в очередь! Всего постов: ${queue.posts.length}`
+		);
+	}
+	// Обработка местоположения
+	if (ctx.message.location) {
+		queue.posts.push({
+			type: 'location',
+			latitude: ctx.message.location.latitude,
+			longitude: ctx.message.location.longitude,
+			chatId: ctx.chat.id,
+			messageId: ctx.message.message_id,
+		});
+		return ctx.reply(
+			`✅ Местоположение добавлено в очередь! Всего постов: ${queue.posts.length}`
+		);
+	}
+
+	// Обработка контакта
+	if (ctx.message.contact) {
+		queue.posts.push({
+			type: 'contact',
+			phoneNumber: ctx.message.contact.phone_number,
+			firstName: ctx.message.contact.first_name,
+			lastName: ctx.message.contact.last_name,
+			chatId: ctx.chat.id,
+			messageId: ctx.message.message_id,
+		});
+		return ctx.reply(
+			`✅ Контакт добавлен в очередь! Всего постов: ${queue.posts.length}`
+		);
+	}
+
+	// Обработка места (venue)
+	if (ctx.message.venue) {
+		queue.posts.push({
+			type: 'venue',
+			latitude: ctx.message.venue.location.latitude,
+			longitude: ctx.message.venue.location.longitude,
+			title: ctx.message.venue.title,
+			address: ctx.message.venue.address,
+			chatId: ctx.chat.id,
+			messageId: ctx.message.message_id,
+		});
+		return ctx.reply(
+			`✅ Место добавлено в очередь! Всего постов: ${queue.posts.length}`
 		);
 	}
 });
-
-// Функция отправки поста в канал и удаления исходного сообщения
+//
 async function postToChannel() {
 	if (queue.posts.length === 0) return;
 
-	// Извлекаем первый пост из очереди
-	const { media, caption, chatId, messageId } = queue.posts.shift();
+	const post = queue.posts.shift();
 
 	try {
-		if (media.length > 1) {
-			// Если медиа несколько — отправляем группой
-			await bot.telegram.sendMediaGroup(CHANNEL_ID, media);
-			if (caption) {
-				await bot.telegram.sendMessage(CHANNEL_ID, caption);
+		switch (post.type) {
+			case 'text':
+				await bot.telegram.sendMessage(CHANNEL_ID, post.content);
+				break;
+			case 'media':
+				const firstMedia = post.media[0];
+				switch (firstMedia.type) {
+					case 'photo':
+						await bot.telegram.sendPhoto(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					case 'video':
+						await bot.telegram.sendVideo(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					case 'animation':
+						await bot.telegram.sendAnimation(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					case 'sticker':
+						await bot.telegram.sendSticker(CHANNEL_ID, firstMedia.media);
+						break;
+					case 'audio':
+						await bot.telegram.sendAudio(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					case 'document':
+						await bot.telegram.sendDocument(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					case 'video_note':
+						await bot.telegram.sendVideoNote(CHANNEL_ID, firstMedia.media);
+						break;
+					case 'voice':
+						await bot.telegram.sendVoice(CHANNEL_ID, firstMedia.media, {
+							caption: post.caption,
+						});
+						break;
+					default:
+						throw new Error(`Unsupported media type: ${firstMedia.type}`);
+				}
+				break;
+			case 'media_group':
+				const mediaGroup = post.media.map((item, index) => ({
+					type: item.type,
+					media: item.media,
+					...(index === 0 && { caption: post.caption }),
+				}));
+				await bot.telegram.sendMediaGroup(CHANNEL_ID, mediaGroup);
+				break;
+			case 'poll':
+				await bot.telegram.sendPoll(CHANNEL_ID, post.question, post.options, {
+					is_anonymous: post.isAnonymous,
+					allows_multiple_answers: post.allowsMultipleAnswers,
+				});
+				break;
+			case 'location':
+				await bot.telegram.sendLocation(
+					CHANNEL_ID,
+					post.latitude,
+					post.longitude
+				);
+				break;
+			case 'contact':
+				await bot.telegram.sendContact(
+					CHANNEL_ID,
+					post.phoneNumber,
+					post.firstName,
+					{ last_name: post.lastName }
+				);
+				break;
+			case 'venue':
+				await bot.telegram.sendVenue(
+					CHANNEL_ID,
+					post.latitude,
+					post.longitude,
+					post.title,
+					post.address
+				);
+				break;
+			default:
+				throw new Error(`Unsupported post type: ${post.type}`);
+		}
+
+		await bot.telegram.sendMessage(ADMIN_ID, '✅ Пост отправлен!');
+
+		if (post.messageIds && post.messageIds.length > 0) {
+			for (const messageId of post.messageIds) {
+				try {
+					await bot.telegram.deleteMessage(post.chatId, messageId);
+					await bot.telegram.sendMessage(
+						ADMIN_ID,
+						`✅ Сообщение ${messageId} удалено.`
+					);
+				} catch (err) {
+					await bot.telegram.sendMessage(
+						ADMIN_ID,
+						`❌ Не удалось удалить сообщение ${messageId}: ${err.message}`
+					);
+				}
 			}
 		} else {
-			const first = media[0];
-			if (first.type === 'photo') {
-				await bot.telegram.sendPhoto(CHANNEL_ID, first.media, { caption });
-			} else if (first.type === 'video') {
-				await bot.telegram.sendVideo(CHANNEL_ID, first.media, { caption });
+			try {
+				await bot.telegram.deleteMessage(post.chatId, post.messageId);
+				await bot.telegram.sendMessage(
+					ADMIN_ID,
+					'✅ Исходное сообщение удалено.'
+				);
+			} catch (err) {
+				await bot.telegram.sendMessage(
+					ADMIN_ID,
+					`❌ Не удалось удалить сообщение: ${err.message}`
+				);
 			}
 		}
-		console.log('✅ Пост отправлен!');
-
-		// Пытаемся удалить исходное сообщение из чата администратора
-		try {
-			await bot.telegram.deleteMessage(chatId, messageId);
-			console.log('✅ Исходное сообщение удалено.');
-		} catch (err) {
-			console.error('❌ Не удалось удалить сообщение:', err);
-		}
 	} catch (error) {
-		console.error('❌ Ошибка отправки поста:', error);
+		await bot.telegram.sendMessage(
+			ADMIN_ID,
+			`❌ Ошибка отправки поста: ${error.message}`
+		);
 	}
 }
 
-// Планировщик: отправка поста каждый час (на 0-й минуте каждого часа)
 schedule.scheduleJob('* * * * *', postToChannel);
 
 bot.launch();
-console.log('🤖 Бот запущен!');
+bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
