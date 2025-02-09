@@ -1,12 +1,6 @@
 const { Telegraf } = require('telegraf');
 const schedule = require('node-schedule');
-const dotenv = require('dotenv');
-
-dotenv.config();
-
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const ADMIN_ID = Number(process.env.ADMIN_ID);
+const { BOT_TOKEN, CHANNEL_ID, ADMIN_ID } = require('./config');
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -16,12 +10,124 @@ let queue = {
 };
 let groupTimers = {};
 
+const mediaTypes = [
+	'photo',
+	'video',
+	'animation',
+	'sticker',
+	'audio',
+	'document',
+	'video_note',
+	'voice',
+];
+
+// Функция для извлечения медиа из сообщения
+const extractMedia = (message) => {
+	return mediaTypes.reduce((acc, type) => {
+		if (message[type]) {
+			if (Array.isArray(message[type])) {
+				acc.push({
+					type,
+					media: message[type][message[type].length - 1].file_id,
+				});
+			} else {
+				acc.push({
+					type,
+					media: message[type].file_id,
+				});
+			}
+		}
+		return acc;
+	}, []);
+};
+
+// Функция для отправки медиа в канал (для отложенных сообщений)
+const sendMediaToChannel = async (mediaMessage) => {
+	try {
+		for (const item of mediaMessage.media) {
+			// Для типов, где нельзя передать caption, не передаём опции
+			const options =
+				item.type !== 'sticker' && item.type !== 'video_note'
+					? { caption: mediaMessage.caption }
+					: {};
+			switch (item.type) {
+				case 'photo':
+					await bot.telegram.sendPhoto(CHANNEL_ID, item.media, options);
+					break;
+				case 'video':
+					await bot.telegram.sendVideo(CHANNEL_ID, item.media, options);
+					break;
+				case 'animation':
+					await bot.telegram.sendAnimation(CHANNEL_ID, item.media, options);
+					break;
+				case 'sticker':
+					await bot.telegram.sendSticker(CHANNEL_ID, item.media);
+					break;
+				case 'audio':
+					await bot.telegram.sendAudio(CHANNEL_ID, item.media, options);
+					break;
+				case 'document':
+					await bot.telegram.sendDocument(CHANNEL_ID, item.media, options);
+					break;
+				case 'video_note':
+					await bot.telegram.sendVideoNote(CHANNEL_ID, item.media);
+					break;
+				case 'voice':
+					await bot.telegram.sendVoice(CHANNEL_ID, item.media, options);
+					break;
+				default:
+					throw new Error(`Unsupported media type: ${item.type}`);
+			}
+		}
+		await bot.telegram.sendMessage(ADMIN_ID, '✅ Медиа отправлено в канал!');
+	} catch (error) {
+		await bot.telegram.sendMessage(
+			ADMIN_ID,
+			`❌ Ошибка отправки медиа: ${error.message}`
+		);
+	}
+};
+
 bot.on('message', async (ctx) => {
 	if (ctx.chat.id !== ADMIN_ID) return;
 
 	const caption = ctx.message.caption || '';
 
-	// Обработка текстовых сообщений
+	// Отложенная отправка медиа (по наличию даты и времени в сообщении)
+	const dateTimeMatch = caption.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+	if (dateTimeMatch) {
+		const sendTime = new Date(dateTimeMatch[1]);
+
+		if (isNaN(sendTime.getTime())) {
+			return ctx.reply(
+				"❌ Неверный формат даты и времени. Пожалуйста, используйте формат 'YYYY-MM-DD HH:mm'."
+			);
+		}
+		if (sendTime <= new Date()) {
+			return ctx.reply(
+				'❌ Время отправки уже наступило или находится в прошлом. Пожалуйста, выберите время в будущем.'
+			);
+		}
+
+		// Извлекаем текст без даты и времени
+		const textWithoutDateTime = caption.replace(dateTimeMatch[0], '').trim();
+		const media = extractMedia(ctx.message);
+
+		if (media.length > 0) {
+			const mediaMessage = { sendTime, media, caption: textWithoutDateTime };
+			queue.posts.push(mediaMessage);
+			schedule.scheduleJob(sendTime, async () => {
+				await sendMediaToChannel(mediaMessage);
+			});
+			return ctx.reply(
+				`✅ Медиа добавлено в очередь для отправки в ${sendTime.toLocaleString()}.`
+			);
+		} else {
+			return ctx.reply('❌ В сообщении нет медиа для отложенной отправки.');
+		}
+	}
+
+	// Обработка текстовых сообщений (без медиа, опросов и т.д.)
 	if (
 		ctx.message.text &&
 		!ctx.message.photo &&
@@ -69,7 +175,6 @@ bot.on('message', async (ctx) => {
 	// Обработка медиа-групп (альбомов)
 	if (ctx.message.media_group_id) {
 		const groupId = ctx.message.media_group_id;
-
 		if (!queue.groups[groupId]) {
 			queue.groups[groupId] = {
 				media: [],
@@ -77,63 +182,15 @@ bot.on('message', async (ctx) => {
 				messageIds: [],
 			};
 		}
-
 		queue.groups[groupId].messageIds.push(ctx.message.message_id);
-
-		if (ctx.message.photo) {
-			const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-			queue.groups[groupId].media.push({ type: 'photo', media: fileId });
-		}
-		if (ctx.message.video) {
-			queue.groups[groupId].media.push({
-				type: 'video',
-				media: ctx.message.video.file_id,
-			});
-		}
-		if (ctx.message.animation) {
-			queue.groups[groupId].media.push({
-				type: 'animation',
-				media: ctx.message.animation.file_id,
-			});
-		}
-		if (ctx.message.sticker) {
-			queue.groups[groupId].media.push({
-				type: 'sticker',
-				media: ctx.message.sticker.file_id,
-			});
-		}
-		if (ctx.message.audio) {
-			queue.groups[groupId].media.push({
-				type: 'audio',
-				media: ctx.message.audio.file_id,
-			});
-		}
-		if (ctx.message.document) {
-			queue.groups[groupId].media.push({
-				type: 'document',
-				media: ctx.message.document.file_id,
-			});
-		}
-		if (ctx.message.video_note) {
-			queue.groups[groupId].media.push({
-				type: 'video_note',
-				media: ctx.message.video_note.file_id,
-			});
-		}
-
-		if (ctx.message.voice) {
-			queue.groups[groupId].media.push({
-				type: 'voice',
-				media: ctx.message.voice.file_id,
-			});
-		}
+		queue.groups[groupId].media.push(...extractMedia(ctx.message));
 		if (!groupTimers[groupId]) {
 			groupTimers[groupId] = setTimeout(async () => {
 				if (queue.groups[groupId]) {
 					queue.posts.push({
 						type: 'media_group',
 						media: queue.groups[groupId].media,
-						caption,
+						caption: caption,
 						chatId: queue.groups[groupId].chatId,
 						messageIds: queue.groups[groupId].messageIds,
 					});
@@ -150,33 +207,7 @@ bot.on('message', async (ctx) => {
 	}
 
 	// Обработка одиночных медиа-сообщений
-	const media = [];
-	if (ctx.message.photo) {
-		const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-		media.push({ type: 'photo', media: fileId });
-	}
-	if (ctx.message.video) {
-		media.push({ type: 'video', media: ctx.message.video.file_id });
-	}
-	if (ctx.message.animation) {
-		media.push({ type: 'animation', media: ctx.message.animation.file_id });
-	}
-	if (ctx.message.sticker) {
-		media.push({ type: 'sticker', media: ctx.message.sticker.file_id });
-	}
-	if (ctx.message.audio) {
-		media.push({ type: 'audio', media: ctx.message.audio.file_id });
-	}
-	if (ctx.message.document) {
-		media.push({ type: 'document', media: ctx.message.document.file_id });
-	}
-	if (ctx.message.video_note) {
-		media.push({ type: 'video_note', media: ctx.message.video_note.file_id });
-	}
-	if (ctx.message.voice) {
-		media.push({ type: 'voice', media: ctx.message.voice.file_id });
-	}
-
+	const media = extractMedia(ctx.message);
 	if (media.length > 0) {
 		queue.posts.push({
 			type: 'media',
@@ -189,6 +220,7 @@ bot.on('message', async (ctx) => {
 			`✅ Медиа добавлено в очередь! Всего постов: ${queue.posts.length}`
 		);
 	}
+
 	// Обработка местоположения
 	if (ctx.message.location) {
 		queue.posts.push({
@@ -234,7 +266,7 @@ bot.on('message', async (ctx) => {
 		);
 	}
 });
-//
+
 async function postToChannel() {
 	if (queue.posts.length === 0) return;
 
@@ -245,7 +277,7 @@ async function postToChannel() {
 			case 'text':
 				await bot.telegram.sendMessage(CHANNEL_ID, post.content);
 				break;
-			case 'media':
+			case 'media': {
 				const firstMedia = post.media[0];
 				switch (firstMedia.type) {
 					case 'photo':
@@ -288,7 +320,8 @@ async function postToChannel() {
 						throw new Error(`Unsupported media type: ${firstMedia.type}`);
 				}
 				break;
-			case 'media_group':
+			}
+			case 'media_group': {
 				const mediaGroup = post.media.map((item, index) => ({
 					type: item.type,
 					media: item.media,
@@ -296,6 +329,7 @@ async function postToChannel() {
 				}));
 				await bot.telegram.sendMediaGroup(CHANNEL_ID, mediaGroup);
 				break;
+			}
 			case 'poll':
 				await bot.telegram.sendPoll(CHANNEL_ID, post.question, post.options, {
 					is_anonymous: post.isAnonymous,
@@ -332,6 +366,7 @@ async function postToChannel() {
 
 		await bot.telegram.sendMessage(ADMIN_ID, '✅ Пост отправлен!');
 
+		// Удаление исходных сообщений (если возможно)
 		if (post.messageIds && post.messageIds.length > 0) {
 			for (const messageId of post.messageIds) {
 				try {
