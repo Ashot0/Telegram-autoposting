@@ -42,7 +42,6 @@ This Telegram bot allows administrators to send media messages directly to a Tel
      BOT_TOKEN: 'YOUR_BOT_TOKEN',
      CHANNEL_ID: 'YOUR_CHANNEL_ID',
      ADMIN_ID: 'YOUR_ADMIN_ID',
-     SERVER_PORT: 3000, // You can adjust the port if needed
    };
    ```
 
