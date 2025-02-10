@@ -105,196 +105,206 @@ bot.on('message', async (ctx) => {
 	// Обрабатываем сообщения только от администратора
 	if (ctx.chat.id !== ADMIN_ID) return;
 
-	// Получаем caption (подпись) сообщения, если она есть
-	const caption = ctx.message.caption || '';
+	setTimeout(
+		async () => {
+			// Получаем caption (подпись) сообщения, если она есть
+			const caption = ctx.message.caption || '';
 
-	// Отложенная отправка медиа: ищем в подписи дату и время в формате "YYYY-MM-DD HH:mm"
-	const dateTimeMatch = caption.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-	if (dateTimeMatch) {
-		// Преобразуем найденную строку в объект Date
-		const sendTime = new Date(dateTimeMatch[1]);
+			// Отложенная отправка медиа: ищем в подписи дату и время в формате "YYYY-MM-DD HH:mm"
+			const dateTimeMatch = caption.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+			if (dateTimeMatch) {
+				// Преобразуем найденную строку в объект Date
+				const sendTime = new Date(dateTimeMatch[1]);
 
-		// Проверяем корректность даты
-		if (isNaN(sendTime.getTime())) {
-			return ctx.reply(
-				"❌ Неверный формат даты и времени. Пожалуйста, используйте формат 'YYYY-MM-DD HH:mm'."
-			);
-		}
-		// Проверяем, что время отправки находится в будущем
-		if (sendTime <= new Date()) {
-			return ctx.reply(
-				'❌ Время отправки уже наступило или находится в прошлом. Пожалуйста, выберите время в будущем.'
-			);
-		}
-
-		// Извлекаем текст сообщения без даты и времени
-		const textWithoutDateTime = caption.replace(dateTimeMatch[0], '').trim();
-		// Извлекаем медиа из сообщения
-		const media = extractMedia(ctx.message);
-
-		if (media.length > 0) {
-			// Формируем объект медиа-сообщения для отложенной отправки
-			const mediaMessage = { sendTime, media, caption: textWithoutDateTime };
-			// Добавляем сообщение в очередь
-			queue.posts.push(mediaMessage);
-			// Планируем отправку медиа в указанное время
-			schedule.scheduleJob(sendTime, async () => {
-				await sendMediaToChannel(mediaMessage);
-			});
-			return ctx.reply(
-				`✅ Медиа добавлено в очередь для отправки в ${sendTime.toLocaleString()}.`
-			);
-		} else {
-			// Если в сообщении не найдено медиа, уведомляем администратора
-			return ctx.reply('❌ В сообщении нет медиа для отложенной отправки.');
-		}
-	}
-
-	// Обработка текстовых сообщений (без медиа, опросов, местоположений и т.д.)
-	if (
-		ctx.message.text && // сообщение содержит текст
-		!ctx.message.photo && // нет фото
-		!ctx.message.video && // нет видео
-		!ctx.message.animation && // нет анимации
-		!ctx.message.sticker && // нет стикера
-		!ctx.message.poll && // нет опроса
-		!ctx.message.audio && // нет аудио
-		!ctx.message.document && // нет документа
-		!ctx.message.location && // нет местоположения
-		!ctx.message.contact && // нет контакта
-		!ctx.message.venue && // нет места проведения
-		!ctx.message.video_note && // нет видео-заметки
-		!ctx.message.voice && // нет голосового сообщения
-		!ctx.message.media_group_id // сообщение не является частью медиа-группы
-	) {
-		// Добавляем текстовое сообщение в очередь
-		queue.posts.push({
-			type: 'text',
-			content: ctx.message.text,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Текст добавлен в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
-
-	// Обработка медиа-групп (альбомов)
-	if (ctx.message.media_group_id) {
-		const groupId = ctx.message.media_group_id;
-		// Если группа с данным ID еще не создана, инициализируем ее
-		if (!queue.groups[groupId]) {
-			queue.groups[groupId] = {
-				media: [],
-				chatId: ctx.chat.id,
-				messageIds: [],
-			};
-		}
-		// Добавляем ID сообщения и извлеченное медиа в группу
-		queue.groups[groupId].messageIds.push(ctx.message.message_id);
-		queue.groups[groupId].media.push(...extractMedia(ctx.message));
-		// Если для этой группы еще не установлен таймер, устанавливаем его
-		if (!groupTimers[groupId]) {
-			groupTimers[groupId] = setTimeout(async () => {
-				if (queue.groups[groupId]) {
-					// После истечения таймера добавляем группу медиа в очередь постов
-					queue.posts.push({
-						type: 'media_group',
-						media: queue.groups[groupId].media,
-						caption: caption,
-						chatId: queue.groups[groupId].chatId,
-						messageIds: queue.groups[groupId].messageIds,
-					});
-					// Удаляем группу и таймер, так как они больше не нужны
-					delete queue.groups[groupId];
-					delete groupTimers[groupId];
-					// Уведомляем администратора об успешном добавлении альбома в очередь
-					await bot.telegram.sendMessage(
-						ADMIN_ID,
-						`✅ Альбом добавлен в очередь! Всего постов: ${queue.posts.length}`
+				// Проверяем корректность даты
+				if (isNaN(sendTime.getTime())) {
+					return ctx.reply(
+						"❌ Неверный формат даты и времени. Пожалуйста, используйте формат 'YYYY-MM-DD HH:mm'."
 					);
 				}
-			}, 5000); // Задержка 5 секунд для сбора всех сообщений альбома
-		}
-		return;
-	}
+				// Проверяем, что время отправки находится в будущем
+				if (sendTime <= new Date()) {
+					return ctx.reply(
+						'❌ Время отправки уже наступило или находится в прошлом. Пожалуйста, выберите время в будущем.'
+					);
+				}
 
-	// Обработка одиночных медиа-сообщений (не входящих в альбом)
-	const media = extractMedia(ctx.message);
-	if (media.length > 0) {
-		queue.posts.push({
-			type: 'media',
-			media,
-			caption,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Медиа добавлено в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
+				// Извлекаем текст сообщения без даты и времени
+				const textWithoutDateTime = caption
+					.replace(dateTimeMatch[0], '')
+					.trim();
+				// Извлекаем медиа из сообщения
+				const media = extractMedia(ctx.message);
 
-	// Обработка сообщений с местоположением
-	if (ctx.message.location) {
-		queue.posts.push({
-			type: 'location',
-			latitude: ctx.message.location.latitude,
-			longitude: ctx.message.location.longitude,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Местоположение добавлено в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
+				if (media.length > 0) {
+					// Формируем объект медиа-сообщения для отложенной отправки
+					const mediaMessage = {
+						sendTime,
+						media,
+						caption: textWithoutDateTime,
+					};
+					// Добавляем сообщение в очередь
+					schedule.scheduleJob(sendTime, async () => {
+						await sendMediaToChannel(mediaMessage);
+					});
+					return ctx.reply(
+						`✅ Медиа добавлено в очередь для отправки в ${sendTime.toLocaleString()}.`
+					);
+				} else {
+					// Если в сообщении не найдено медиа, уведомляем администратора
+					return ctx.reply('❌ В сообщении нет медиа для отложенной отправки.');
+				}
+			}
 
-	// Обработка опросов
-	if (ctx.message.poll) {
-		const poll = ctx.message.poll;
-		queue.posts.push({
-			type: 'poll',
-			question: poll.question,
-			options: poll.options.map((option) => option.text),
-			isAnonymous: poll.is_anonymous,
-			allowsMultipleAnswers: poll.allows_multiple_answers,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Опрос добавлен в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
+			// Обработка текстовых сообщений (без медиа, опросов, местоположений и т.д.)
+			if (
+				ctx.message.text && // сообщение содержит текст
+				!ctx.message.photo && // нет фото
+				!ctx.message.video && // нет видео
+				!ctx.message.animation && // нет анимации
+				!ctx.message.sticker && // нет стикера
+				!ctx.message.poll && // нет опроса
+				!ctx.message.audio && // нет аудио
+				!ctx.message.document && // нет документа
+				!ctx.message.location && // нет местоположения
+				!ctx.message.contact && // нет контакта
+				!ctx.message.venue && // нет места проведения
+				!ctx.message.video_note && // нет видео-заметки
+				!ctx.message.voice && // нет голосового сообщения
+				!ctx.message.media_group_id // сообщение не является частью медиа-группы
+			) {
+				// Добавляем текстовое сообщение в очередь
+				queue.posts.push({
+					type: 'text',
+					content: ctx.message.text,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Текст добавлен в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
 
-	// Обработка контактов
-	if (ctx.message.contact) {
-		queue.posts.push({
-			type: 'contact',
-			phoneNumber: ctx.message.contact.phone_number,
-			firstName: ctx.message.contact.first_name,
-			lastName: ctx.message.contact.last_name,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Контакт добавлен в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
+			// Обработка медиа-групп (альбомов)
+			if (ctx.message.media_group_id) {
+				const groupId = ctx.message.media_group_id;
+				// Если группа с данным ID еще не создана, инициализируем ее
+				if (!queue.groups[groupId]) {
+					queue.groups[groupId] = {
+						media: [],
+						chatId: ctx.chat.id,
+						messageIds: [],
+					};
+				}
+				// Добавляем ID сообщения и извлеченное медиа в группу
+				queue.groups[groupId].messageIds.push(ctx.message.message_id);
+				queue.groups[groupId].media.push(...extractMedia(ctx.message));
+				// Если для этой группы еще не установлен таймер, устанавливаем его
+				if (!groupTimers[groupId]) {
+					groupTimers[groupId] = setTimeout(async () => {
+						if (queue.groups[groupId]) {
+							// После истечения таймера добавляем группу медиа в очередь постов
+							queue.posts.push({
+								type: 'media_group',
+								media: queue.groups[groupId].media,
+								caption: caption,
+								chatId: queue.groups[groupId].chatId,
+								messageIds: queue.groups[groupId].messageIds,
+							});
+							// Удаляем группу и таймер, так как они больше не нужны
+							delete queue.groups[groupId];
+							delete groupTimers[groupId];
+							// Уведомляем администратора об успешном добавлении альбома в очередь
+							await bot.telegram.sendMessage(
+								ADMIN_ID,
+								`✅ Альбом добавлен в очередь! Всего постов: ${queue.posts.length}`
+							);
+						}
+					}, 5000); // Задержка 5 секунд для сбора всех сообщений альбома
+				}
+				return;
+			}
 
-	// Обработка сообщений с местом проведения (venue)
-	if (ctx.message.venue) {
-		queue.posts.push({
-			type: 'venue',
-			latitude: ctx.message.venue.location.latitude,
-			longitude: ctx.message.venue.location.longitude,
-			title: ctx.message.venue.title,
-			address: ctx.message.venue.address,
-			chatId: ctx.chat.id,
-			messageId: ctx.message.message_id,
-		});
-		return ctx.reply(
-			`✅ Место добавлено в очередь! Всего постов: ${queue.posts.length}`
-		);
-	}
+			// Обработка одиночных медиа-сообщений (не входящих в альбом)
+			const media = extractMedia(ctx.message);
+			if (media.length > 0) {
+				queue.posts.push({
+					type: 'media',
+					media,
+					caption,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Медиа добавлено в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
+
+			// Обработка сообщений с местоположением
+			if (ctx.message.location) {
+				queue.posts.push({
+					type: 'location',
+					latitude: ctx.message.location.latitude,
+					longitude: ctx.message.location.longitude,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Местоположение добавлено в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
+
+			// Обработка опросов
+			if (ctx.message.poll) {
+				const poll = ctx.message.poll;
+				queue.posts.push({
+					type: 'poll',
+					question: poll.question,
+					options: poll.options.map((option) => option.text),
+					isAnonymous: poll.is_anonymous,
+					allowsMultipleAnswers: poll.allows_multiple_answers,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Опрос добавлен в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
+
+			// Обработка контактов
+			if (ctx.message.contact) {
+				queue.posts.push({
+					type: 'contact',
+					phoneNumber: ctx.message.contact.phone_number,
+					firstName: ctx.message.contact.first_name,
+					lastName: ctx.message.contact.last_name,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Контакт добавлен в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
+
+			// Обработка сообщений с местом проведения (venue)
+			if (ctx.message.venue) {
+				queue.posts.push({
+					type: 'venue',
+					latitude: ctx.message.venue.location.latitude,
+					longitude: ctx.message.venue.location.longitude,
+					title: ctx.message.venue.title,
+					address: ctx.message.venue.address,
+					chatId: ctx.chat.id,
+					messageId: ctx.message.message_id,
+				});
+				return ctx.reply(
+					`✅ Место добавлено в очередь! Всего постов: ${queue.posts.length}`
+				);
+			}
+		},
+		600000
+		// 10000
+	);
 });
 
 // Функция для отправки поста из очереди в канал
