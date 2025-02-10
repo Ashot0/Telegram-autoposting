@@ -434,7 +434,7 @@ async function postToChannel() {
 }
 
 // Планируем выполнение функции postToChannel каждую минуту (cron-выражение "* * * * *")
-schedule.scheduleJob('* * * * *', postToChannel);
+schedule.scheduleJob('0 * * * *', postToChannel);
 startServer();
 bot.launch(); // Запускаем бота
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!'); // Уведомляем администратора о запуске бота
