@@ -201,11 +201,21 @@ bot.on("message", async (ctx) => {
 
     if (match) {
       const [_, day, month, year, hour, minute] = match;
+
+      // Дата отправки
       const sendDate = moment(
         `${year}-${month}-${day} ${hour + TIME_ZONE}:${minute}`,
         "YYYY-MM-DD HH:mm"
       );
-      sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
+
+      // Отображаемая дата
+      sendReply(
+        message,
+        `⏳ Отправка сообщения в ${moment(
+        `${year}-${month}-${day} ${hour}:${minute}`,
+        "YYYY-MM-DD HH:mm"
+      )}`
+      );
 
       const newCaption = caption.replace(dateRegex, "").trim();
       const delay = sendDate.diff(moment(), "milliseconds");
