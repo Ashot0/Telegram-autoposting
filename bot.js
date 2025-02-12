@@ -232,15 +232,11 @@ bot.on("message", async (ctx) => {
       processMediaGroup(message, mediaGroupId, mediaArray);
     } else {
       // Если даты нет, просто добавляем в очередь
+	  console.log("message", message);
+	  
       queue.push({
         chatId: message.chat.id,
-        media: [
-          {
-            type: "message",
-            messageId: message.message_id,
-            caption: message.caption,
-          },
-        ],
+        media: [{ type: "message", messageId: message.message_id, caption:message.caption }],
       });
       sendReply(message, "✅ Сообщение добавлено в очередь.");
     }
