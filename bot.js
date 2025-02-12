@@ -212,9 +212,9 @@ bot.on("message", async (ctx) => {
       sendReply(
         message,
         `⏳ Отправка сообщения в ${moment(
-        `${year}-${month}-${day} ${hour}:${minute}`,
-        "YYYY-MM-DD HH:mm"
-      )}`
+          `${year}-${month}-${day} ${hour + TIME_ZONE}:${minute}`,
+          "YYYY-MM-DD HH:mm"
+        )}`
       );
 
       const newCaption = caption.replace(dateRegex, "").trim();
