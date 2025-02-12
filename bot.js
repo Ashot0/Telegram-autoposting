@@ -6,6 +6,7 @@ const {
   ADMIN_ID,
   SEND_TIMER,
   SEND_COOLDOWN,
+  TIME_ZONE,
 } = require("./config");
 const { startServer } = require("./server");
 const moment = require("moment"); // Для удобной работы с датами
@@ -154,7 +155,7 @@ async function sendMessageFromQueue() {
       console.log(
         `[QUEUE] Отправляем одиночное сообщение: ${task.media[0].messageId}`
       );
-	  
+
       await sendMessage(
         task.chatId,
         task.media[0].messageId,
@@ -176,7 +177,7 @@ async function sendMessageFromQueue() {
     }
     await bot.telegram.sendMessage(
       ADMIN_ID,
-      "✅ Сообщение переслано и удалено!"
+      `✅ Сообщение переслано и удалено! В очереди ${queue.length}`
     );
   } catch (error) {
     console.error(`[ERROR] Ошибка при отправке сообщения: ${error.message}`);
@@ -201,9 +202,11 @@ bot.on("message", async (ctx) => {
     if (match) {
       const [_, day, month, year, hour, minute] = match;
       const sendDate = moment(
-        `${year}-${month}-${day} ${hour}:${minute}`,
+        `${year}-${month}-${day} ${hour + TIME_ZONE}:${minute}`,
         "YYYY-MM-DD HH:mm"
       );
+      sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
+
       const newCaption = caption.replace(dateRegex, "").trim();
       const delay = sendDate.diff(moment(), "milliseconds");
 
@@ -213,10 +216,25 @@ bot.on("message", async (ctx) => {
             const groupMedia = mediaGroups.get(mediaGroupId);
             if (groupMedia && groupMedia.length > 0) {
               await sendMediaGroup(groupMedia);
-              mediaGroups.delete(mediaGroupId);
+              setTimeout(() => { mediaGroups.delete(mediaGroupId); }, 5000)
             }
           } else {
             await sendMessage(message.chat.id, message.message_id, newCaption);
+            try {
+              await bot.telegram.deleteMessage(
+                message.chat.id,
+                message.message_id
+              );
+
+              console.log(
+                `[DELETE] Одиночное сообщение удалено: ${message.message_id}`
+              );
+
+            } catch (error) {
+              console.error(
+                `[ERROR] Ошибка при удалении ${message.message_id}: ${error.message}`
+              );
+            }
           }
           sendReply(message, "✅ Сообщение отправлено по расписанию!");
         });
@@ -232,11 +250,11 @@ bot.on("message", async (ctx) => {
       processMediaGroup(message, mediaGroupId, mediaArray);
     } else {
       // Если даты нет, просто добавляем в очередь
-	  console.log("message", message);
-	  
+      console.log("message", message);
+
       queue.push({
         chatId: message.chat.id,
-        media: [{ type: "message", messageId: message.message_id, caption:message.caption }],
+        media: [{ type: "message", messageId: message.message_id, caption: message.caption }],
       });
       sendReply(message, "✅ Сообщение добавлено в очередь.");
     }
