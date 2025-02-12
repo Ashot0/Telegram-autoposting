@@ -169,7 +169,7 @@ bot.on('message', async (ctx) => {
 			});
 			sendReply(ctx, '✅ Сообщение добавлено в очередь.');
 		}
-	}, 60000);
+	}, 600000);
 });
 
 startServer();
