@@ -111,63 +111,65 @@ async function sendMessageFromQueue() {
 	}
 }
 
-schedule.scheduleJob('* * * * *', sendMessageFromQueue);
+schedule.scheduleJob('0 * * * *', sendMessageFromQueue);
 
 bot.on('message', async (ctx) => {
 	if (ctx.chat.id !== ADMIN_ID) return;
 
-	const { message } = ctx;
-	const mediaGroupId = message.media_group_id;
-	const caption = message.caption || message.text || '';
+	setTimeout(() => {
+		const { message } = ctx;
+		const mediaGroupId = message.media_group_id;
+		const caption = message.caption || message.text || '';
 
-	// Регулярное выражение для поиска даты в формате "день-месяц-год час:минута"
-	const dateRegex = /(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/;
-	const match = caption.match(dateRegex);
+		// Регулярное выражение для поиска даты в формате "день-месяц-год час:минута"
+		const dateRegex = /(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/;
+		const match = caption.match(dateRegex);
 
-	if (match) {
-		// Извлекаем дату и время
-		const [_, day, month, year, hour, minute] = match;
-		const sendDate = moment(
-			`${year}-${month}-${day} ${hour}:${minute}`,
-			'YYYY-MM-DD HH:mm'
-		);
+		if (match) {
+			// Извлекаем дату и время
+			const [_, day, month, year, hour, minute] = match;
+			const sendDate = moment(
+				`${year}-${month}-${day} ${hour}:${minute}`,
+				'YYYY-MM-DD HH:mm'
+			);
 
-		// Убираем дату из текста сообщения
-		const newCaption = caption.replace(dateRegex, '').trim();
+			// Убираем дату из текста сообщения
+			const newCaption = caption.replace(dateRegex, '').trim();
 
-		// Устанавливаем задачу для отправки сообщения
-		const delay = sendDate.diff(moment(), 'milliseconds');
-		if (delay > 0) {
-			schedule.scheduleJob(sendDate.toDate(), async () => {
-				queue.push({
-					chatId: ctx.chat.id,
-					media: [
-						{
-							type: 'message',
-							messageId: message.message_id,
-							caption: newCaption,
-						},
-					],
+			// Устанавливаем задачу для отправки сообщения
+			const delay = sendDate.diff(moment(), 'milliseconds');
+			if (delay > 0) {
+				schedule.scheduleJob(sendDate.toDate(), async () => {
+					queue.push({
+						chatId: ctx.chat.id,
+						media: [
+							{
+								type: 'message',
+								messageId: message.message_id,
+								caption: newCaption,
+							},
+						],
+					});
+					sendReply(ctx, '✅ Сообщение с датой отправлено в указанное время.');
 				});
-				sendReply(ctx, '✅ Сообщение будет отправлено в указанное время.');
-			});
-		} else {
-			sendReply(ctx, '❌ Указанная дата уже прошла.');
-		}
-	} else if (mediaGroupId) {
-		// Обработка медиагруппы
-		if (!mediaGroups.has(mediaGroupId)) mediaGroups.set(mediaGroupId, []);
+			} else {
+				sendReply(ctx, '❌ Указанная дата уже прошла.');
+			}
+		} else if (mediaGroupId) {
+			// Обработка медиагруппы
+			if (!mediaGroups.has(mediaGroupId)) mediaGroups.set(mediaGroupId, []);
 
-		const mediaArray = mediaGroups.get(mediaGroupId);
-		processMediaGroup(message, mediaGroupId, mediaArray); // Обрабатываем медиагруппу
-	} else {
-		// Если даты нет, просто добавляем в очередь
-		queue.push({
-			chatId: ctx.chat.id,
-			media: [{ type: 'message', messageId: message.message_id }],
-		});
-		sendReply(ctx, '✅ Сообщение добавлено в очередь.');
-	}
+			const mediaArray = mediaGroups.get(mediaGroupId);
+			processMediaGroup(message, mediaGroupId, mediaArray); // Обрабатываем медиагруппу
+		} else {
+			// Если даты нет, просто добавляем в очередь
+			queue.push({
+				chatId: ctx.chat.id,
+				media: [{ type: 'message', messageId: message.message_id }],
+			});
+			sendReply(ctx, '✅ Сообщение добавлено в очередь.');
+		}
+	}, 60000);
 });
 
 startServer();
