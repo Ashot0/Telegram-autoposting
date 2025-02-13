@@ -284,32 +284,5 @@ bot.on("message", async (ctx) => {
 
 startServer();
 
-process.once("SIGINT", () => gracefulShutdown("SIGINT"));
-process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
-
-async function gracefulShutdown(signal) {
-  console.log(`Received ${signal}, stopping bot...`);
-  try {
-    await bot.stop(signal);
-    console.log("Bot stopped gracefully.");
-    setTimeout(() => process.exit(0), 100); // Даем немного времени перед выходом
-  } catch (error) {
-    console.error("Error during shutdown:", error);
-    process.exit(1);
-  }
-}
-
-
-async function startBot() {
-  try {
-    await bot.telegram.deleteWebhook();
-    await bot.launch({
-      dropPendingUpdates: true,
-    });
-    await bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен без конфликтов!");
-  } catch (error) {
-    console.error("Ошибка при запуске бота:", error);
-  }
-}
-
-startBot();
+bot.launch();
+bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
