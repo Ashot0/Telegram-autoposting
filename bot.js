@@ -19,22 +19,27 @@ let mediaGroups = new Map();
 async function sendMessage(chatId, messageId, caption) {
   try {
     await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, { caption });
+
   } catch (error) {
     throw new Error(`Ошибка при отправке сообщения: ${error.message}`);
   }
 }
+
+
 
 // Функция для отправки медиагруппы
 async function sendMediaGroup(media) {
   if (!media || media.length === 0) {
     throw new Error("Медиагруппа пуста");
   }
+
   try {
     await bot.telegram.sendMediaGroup(CHANNEL_ID, media);
   } catch (error) {
     throw new Error(`Ошибка при отправке медиагруппы: ${error.message}`);
   }
 }
+
 
 // Функция для отправки ответа пользователю
 async function sendReply(message, text) {
@@ -45,13 +50,16 @@ async function sendReply(message, text) {
   }
 }
 
+
 // Функция для получения fileId для медиафайлов
 function getFileId(message) {
   const mediaType = ["photo", "video", "document", "audio"].find(
     (type) => message[type]
   );
+
   if (!mediaType) return null;
   const mediaContent = message[mediaType];
+
   if (Array.isArray(mediaContent)) {
     return mediaContent[mediaContent.length - 1].file_id;
   } else {
@@ -59,11 +67,13 @@ function getFileId(message) {
   }
 }
 
+
 // Функция для обработки медиагруппы
 function processMediaGroup(message, mediaGroupId, mediaArray) {
   const mediaType = ["photo", "video", "document", "audio"].find(
     (type) => message[type]
   );
+
   const fileId = getFileId(message);
   if (fileId) {
     mediaArray.push({
@@ -99,10 +109,12 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
         sendReply(message, "✅ Медиафайлы добавлены в очередь.");
       }
     }, 2000);
+
   } else {
     sendReply(message, "❌ Ошибка: Не удалось определить `file_id`.");
   }
 }
+
 
 // Основная функция для обработки сообщений из очереди
 async function sendMessageFromQueue() {
@@ -110,6 +122,7 @@ async function sendMessageFromQueue() {
     console.log("[QUEUE] Очередь пуста, ничего не отправляем.");
     return;
   }
+
   const task = queue.shift();
   console.log(
     `[QUEUE] Отправляем сообщение из очереди: ${JSON.stringify(task)}`
@@ -135,6 +148,7 @@ async function sendMessageFromQueue() {
       // Удаление исходных сообщений из чата
       for (const mediaItem of task.media) {
         if (mediaItem.messageId) {
+
           try {
             await bot.telegram.deleteMessage(task.chatId, mediaItem.messageId);
             console.log(
@@ -145,6 +159,7 @@ async function sendMessageFromQueue() {
               `[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
             );
           }
+
         } else {
           console.error(
             `[ERROR] Нет messageId для удаления: ${JSON.stringify(mediaItem)}`
@@ -203,19 +218,14 @@ bot.on("message", async (ctx) => {
       const [_, day, month, year, hour, minute] = match;
 
       // Дата отправки
+      
       const sendDate = moment(
-        `${year}-${month}-${day} ${hour + TIME_ZONE}:${minute}`,
+        `${year}-${month}-${day} ${hour}:${minute}`,
         "YYYY-MM-DD HH:mm"
-      );
+      ).utcOffset(TIME_ZONE, true);
 
       // Отображаемая дата
-      sendReply(
-        message,
-        `⏳ Отправка сообщения в ${moment(
-          `${year}-${month}-${day} ${hour + TIME_ZONE}:${minute}`,
-          "YYYY-MM-DD HH:mm"
-        )}`
-      );
+      sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
 
       const newCaption = caption.replace(dateRegex, "").trim();
       const delay = sendDate.diff(moment(), "milliseconds");
@@ -259,9 +269,8 @@ bot.on("message", async (ctx) => {
       const mediaArray = mediaGroups.get(mediaGroupId);
       processMediaGroup(message, mediaGroupId, mediaArray);
     } else {
-      // Если даты нет, просто добавляем в очередь
-      console.log("message", message);
 
+      // Если даты нет, просто добавляем в очередь
       queue.push({
         chatId: message.chat.id,
         media: [{ type: "message", messageId: message.message_id, caption: message.caption }],
@@ -272,5 +281,17 @@ bot.on("message", async (ctx) => {
 });
 
 startServer();
+
+process.once("SIGINT", () => {
+  console.log("Bot stopped via SIGINT");
+  bot.stop("SIGINT");
+});
+
+process.once("SIGTERM", () => {
+  console.log("Bot stopped via SIGTERM");
+  bot.stop("SIGTERM");
+});
+
+
 bot.launch();
 bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
