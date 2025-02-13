@@ -282,16 +282,20 @@ bot.on("message", async (ctx) => {
 
 startServer();
 
-process.once("SIGINT", () => {
-  console.log("Bot stopped via SIGINT");
-  bot.stop("SIGINT");
-});
+process.once("SIGINT", () => gracefulShutdown("SIGINT"));
+process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
-process.once("SIGTERM", () => {
-  console.log("Bot stopped via SIGTERM");
-  bot.stop("SIGTERM");
-});
-
+async function gracefulShutdown(signal) {
+  console.log(`Received ${signal}, stopping bot...`);
+  try {
+    await bot.stop(signal);
+    console.log("Bot stopped gracefully.");
+    setTimeout(() => process.exit(0), 100); // Даем немного времени перед выходом
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+    process.exit(1);
+  }
+}
 
 bot.launch();
 bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
