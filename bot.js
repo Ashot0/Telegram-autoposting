@@ -297,5 +297,21 @@ async function gracefulShutdown(signal) {
   }
 }
 
-bot.launch();
-bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
+async function clearPreviousSessions() {
+  try {
+    const updates = await bot.telegram.getUpdates(0);
+    if (updates.length === 0) {
+      console.log("✅ Попередніх сесій не виявлено.");
+    } else {
+      console.log("⚠️ Виявлено активну сесію, очищуємо...");
+    }
+  } catch (error) {
+    console.log("❌ Помилка при очищенні попередніх сесій:", error.message);
+  }
+}
+
+(async () => {
+  await clearPreviousSessions();
+  await bot.launch();
+  bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
+})();
