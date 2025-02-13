@@ -1,5 +1,8 @@
 const { Telegraf } = require("telegraf");
 const schedule = require("node-schedule");
+const punycode = require("punycode/");
+const moment = require("moment");
+
 const {
   BOT_TOKEN,
   CHANNEL_ID,
@@ -9,11 +12,11 @@ const {
   TIME_ZONE,
 } = require("./config");
 const { startServer } = require("./server");
-const moment = require("moment"); // Для удобной работы с датами
 
 const bot = new Telegraf(BOT_TOKEN);
 let queue = [];
 let mediaGroups = new Map();
+
 
 // Функция для отправки обычного сообщения
 async function sendMessage(chatId, messageId, caption) {
@@ -24,7 +27,6 @@ async function sendMessage(chatId, messageId, caption) {
     throw new Error(`Ошибка при отправке сообщения: ${error.message}`);
   }
 }
-
 
 
 // Функция для отправки медиагруппы
@@ -297,21 +299,17 @@ async function gracefulShutdown(signal) {
   }
 }
 
-async function clearPreviousSessions() {
+
+async function startBot() {
   try {
-    const updates = await bot.telegram.getUpdates(0);
-    if (updates.length === 0) {
-      console.log("✅ Попередніх сесій не виявлено.");
-    } else {
-      console.log("⚠️ Виявлено активну сесію, очищуємо...");
-    }
+    await bot.telegram.deleteWebhook();
+    await bot.launch({
+      dropPendingUpdates: true,
+    });
+    await bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен без конфликтов!");
   } catch (error) {
-    console.log("❌ Помилка при очищенні попередніх сесій:", error.message);
+    console.error("Ошибка при запуске бота:", error);
   }
 }
 
-(async () => {
-  await clearPreviousSessions();
-  await bot.launch();
-  bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
-})();
+startBot();
