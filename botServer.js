@@ -7,7 +7,7 @@ router.get('/', (req, res) => {
 });
 
 router.post("/", (req, res) => {
-  console.log("Получено обновление:", req.body);
+  console.log("[UPDATE] Получено обновление:", req.body);
   res.sendStatus(200); 
 });
 
