@@ -279,8 +279,15 @@ bot.on("message", async (ctx) => {
     });
 
     if (isMessageInQueue) {
-      sendReply(message, "Такое сообщение уже присутствует в очереди");
-      return;
+      sendReply(message, "❌ Такое сообщение уже присутствует в очереди").then(
+        () => {
+          bot.telegram
+            .deleteMessage(message.chat.id, message.message_id)
+            .then(() => {
+              return;
+            });
+        }
+      );
     }
 
     // Ищем дату в формате "день-месяц-год час:минута"
@@ -301,7 +308,6 @@ bot.on("message", async (ctx) => {
       // Отображаемая дата
       sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
 
-      const newCaption = caption.replace(dateRegex, "").trim();
       const delay = sendDate.diff(moment(), "milliseconds");
 
       if (delay > 0) {
