@@ -143,11 +143,24 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
     });
 
     // Даем время на поступление остальных сообщений из группы
-    setTimeout(() => {
+    setTimeout(async() => {
       const groupMedia = mediaGroups.get(mediaGroupId);
       if (groupMedia && groupMedia.length > 0) {
         if (isMediaGroupDuplicate(groupMedia)) {
-          sendReply(message, "Такая медиагруппа уже присутствует в очереди");
+          // Удаляем ВСЕ сообщения медиагруппы из чата администратора
+          for (const mediaItem of groupMedia) {
+            try {
+              await bot.telegram.deleteMessage(
+                message.chat.id,  // message.chat.id - это чат администратора
+                mediaItem.messageId
+              );
+              console.log(`[DELETE] Удален дубликат: ${mediaItem.messageId}`);
+            } catch (error) {
+              // Не знаешь => не трогай
+            }
+          }
+
+          await sendReply(message, "❌ Медиагруппа уже в очереди. Сообщения удалены.");
           mediaGroups.delete(mediaGroupId);
           return;
         }
@@ -157,7 +170,7 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
           media: groupMedia,
         });
         mediaGroups.delete(mediaGroupId);
-        sendReply(message, "✅ Медиафайлы добавлены в очередь.");
+        await sendReply(message, "✅ Медиафайлы добавлены в очередь.");
       }
     }, 2000);
   } else {
@@ -384,6 +397,11 @@ bot.on("message", async (ctx) => {
 bot.on("edited_message", async (ctx) => {
   if (ctx.chat.id !== ADMIN_ID) return;
   const editedMessage = ctx.update.edited_message;
+
+   if (!editedMessage?.chat || editedMessage.chat.id !== ADMIN_ID) {
+     console.error("[ERROR] editedMessage или chat не определены");
+     return;
+   }
 
   const messageId = editedMessage.message_id;
 
