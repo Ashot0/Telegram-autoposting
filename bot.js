@@ -279,15 +279,14 @@ bot.on("message", async (ctx) => {
     });
 
     if (isMessageInQueue) {
-      sendReply(message, "❌ Такое сообщение уже присутствует в очереди").then(
-        () => {
-          bot.telegram
-            .deleteMessage(message.chat.id, message.message_id)
-            .then(() => {
-              return;
-            });
-        }
-      );
+      sendReply(message, "❌ Такое сообщение уже присутствует в очереди")
+        .then(() =>
+          bot.telegram.deleteMessage(message.chat.id, message.message_id)
+        )
+        .then(() => {
+          return;
+        });
+      return;
     }
 
     // Ищем дату в формате "день-месяц-год час:минута"
