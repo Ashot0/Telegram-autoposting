@@ -57,11 +57,13 @@ async function sendMediaGroup(media) {
 // Функция для отправки ответа пользователю
 async function sendReply(message, text) {
   try {
-    await bot.telegram.sendMessage(message.chat.id, text).then((reply) => {
-      if (message.chat.id === ADMIN_ID) {
-        adminLogMessages.push(reply.message_id);
-      }
-    });
+    await bot.telegram
+      .sendMessage(message.chat?.id || message, text)
+      .then((reply) => {
+        if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
+          adminLogMessages.push(reply.message_id);
+        }
+      });
   } catch (error) {
     console.error("[ERROR] Ошибка при отправке ответа:", error.message);
   }
@@ -143,7 +145,7 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
     });
 
     // Даем время на поступление остальных сообщений из группы
-    setTimeout(async() => {
+    setTimeout(async () => {
       const groupMedia = mediaGroups.get(mediaGroupId);
       if (groupMedia && groupMedia.length > 0) {
         if (isMediaGroupDuplicate(groupMedia)) {
@@ -151,7 +153,7 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
           for (const mediaItem of groupMedia) {
             try {
               await bot.telegram.deleteMessage(
-                message.chat.id,  // message.chat.id - это чат администратора
+                message.chat.id, // message.chat.id - это чат администратора
                 mediaItem.messageId
               );
               console.log(`[DELETE] Удален дубликат: ${mediaItem.messageId}`);
@@ -160,7 +162,10 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
             }
           }
 
-          await sendReply(message, "❌ Медиагруппа уже в очереди. Сообщения удалены.");
+          await sendReply(
+            message,
+            "❌ Медиагруппа уже в очереди. Сообщения удалены."
+          );
           mediaGroups.delete(mediaGroupId);
           return;
         }
@@ -254,7 +259,7 @@ async function sendMessageFromQueue() {
         );
       }
     }
-
+    
     sendReply(
       ADMIN_ID,
       `✅ Сообщение переслано и удалено! В очереди ${queue.length}`
@@ -398,10 +403,10 @@ bot.on("edited_message", async (ctx) => {
   if (ctx.chat.id !== ADMIN_ID) return;
   const editedMessage = ctx.update.edited_message;
 
-   if (!editedMessage?.chat || editedMessage.chat.id !== ADMIN_ID) {
-     console.error("[ERROR] editedMessage или chat не определены");
-     return;
-   }
+  if (!editedMessage?.chat || editedMessage.chat.id !== ADMIN_ID) {
+    console.error("[ERROR] editedMessage или chat не определены");
+    return;
+  }
 
   const messageId = editedMessage.message_id;
 
@@ -425,7 +430,7 @@ bot.on("edited_message", async (ctx) => {
     queue[taskIndex].media[0].has_media_spoiler =
       editedMessage.has_media_spoiler || "";
 
-    sendReply(editedMessage, "Сообщение обновлено в очереди.");
+    sendReply(ADMIN_ID, "Сообщение обновлено в очереди.");
     console.log(`[EDITED]Сообщение ${messageId} обновлено в очереди.`);
   } else {
     console.log(
