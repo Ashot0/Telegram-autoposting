@@ -264,15 +264,67 @@ async function sendMessageFromQueue() {
 }
 
 async function sendPauseKeyboard(ctx) {
+	const keyboard = getPauseKeyboard();
+	const messageText = '🤖 Управление рассылкой:';
+
 	try {
-		const sentMessage = await bot.telegram.sendMessage(
-			ADMIN_ID,
-			'🤖 Управление рассылкой:',
-			getPauseKeyboard()
-		);
-		keyboardMessageId = sentMessage.message_id;
+		if (keyboardMessageId) {
+			// Пытаемся отредактировать существующее сообщение
+			if (ctx) {
+				await ctx.telegram.editMessageText(
+					ADMIN_ID,
+					keyboardMessageId,
+					null,
+					messageText,
+					{
+						reply_markup: keyboard.reply_markup,
+					}
+				);
+			} else {
+				await bot.telegram.editMessageText(
+					ADMIN_ID,
+					keyboardMessageId,
+					null,
+					messageText,
+					{
+						reply_markup: keyboard.reply_markup,
+					}
+				);
+			}
+		} else {
+			// Отправляем новое сообщение
+			let sentMessage;
+			if (ctx) {
+				sentMessage = await ctx.reply(messageText, keyboard);
+			} else {
+				sentMessage = await bot.telegram.sendMessage(
+					ADMIN_ID,
+					messageText,
+					keyboard
+				);
+			}
+			keyboardMessageId = sentMessage.message_id;
+		}
 	} catch (error) {
-		console.error('Ошибка при отправке клавиатуры:', error);
+		if (
+			error.code === 400 &&
+			error.description.includes('message to edit not found')
+		) {
+			// Сообщение было удалено, отправляем новое
+			let sentMessage;
+			if (ctx) {
+				sentMessage = await ctx.reply(messageText, keyboard);
+			} else {
+				sentMessage = await bot.telegram.sendMessage(
+					ADMIN_ID,
+					messageText,
+					keyboard
+				);
+			}
+			keyboardMessageId = sentMessage.message_id;
+		} else {
+			console.error('Ошибка при обновлении клавиатуры:', error);
+		}
 	}
 }
 
@@ -286,14 +338,17 @@ bot.on('message', async (ctx) => {
 	if (text === '⏸️ Пауза' || text === '▶️ Возобновить') {
 		isPaused = !isPaused;
 
-		// Отправляем подтверждение с обновлённой клавиатурой
-		await ctx.reply(
-			isPaused ? '⏸️ Рассылка приостановлена' : '▶️ Рассылка возобновлена',
-			getPauseKeyboard()
-		);
+		// Обновляем клавиатуру в существующем сообщении
+		await sendPauseKeyboard(ctx);
 
-		keyboardMessageId = ctx.message.message_id;
-		return; // Не обрабатываем команду как обычное сообщение
+		// Удаляем сообщение пользователя
+		try {
+			await ctx.deleteMessage();
+		} catch (error) {
+			console.error('Ошибка при удалении сообщения:', error);
+		}
+
+		return;
 	}
 
 	setTimeout(() => {
