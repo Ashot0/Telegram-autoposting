@@ -1,8 +1,9 @@
 const { Telegraf } = require("telegraf");
+const { Markup } = require("telegraf");
 const schedule = require("node-schedule");
 const punycode = require("punycode/");
 const moment = require("moment");
-const { Markup } = require("telegraf");
+const { startServer } = require("./server");
 const {
   BOT_TOKEN,
   CHANNEL_ID,
@@ -11,96 +12,29 @@ const {
   SEND_COOLDOWN,
   TIME_ZONE,
 } = require("./config");
-const { startServer } = require("./server");
 
 const bot = new Telegraf(BOT_TOKEN);
 let queue = [];
 let mediaGroups = new Map();
-const adminLogMessages = [];
+let isPaused = false;
 
+// Импортируем функции отправки
+const {
+  sendMessage,
+  sendMediaGroup,
+  sendReply,
+  sendReplyWithDeleteButton,
+  getAdminLogMessages,
+  clearAdminLogMessages,
+} = require("./Sends");
 // Функция для отправки обычного сообщения
-async function sendMessage(
-  chatId,
-  messageId,
-  caption,
-  caption_entities,
-  show_caption_above_media,
-  has_media_spoiler
-) {
-  try {
-    await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, {
-      caption,
-      caption_entities,
-      show_caption_above_media,
-      has_media_spoiler,
-    });
-  } catch (error) {
-    throw new Error(`[ERROR] Ошибка при отправке сообщения: ${error.message}`);
-  }
-}
 
-// Функция для отправки медиагруппы
-async function sendMediaGroup(media) {
-  if (!media || media.length === 0) {
-    throw new Error("[ERROR] Медиагруппа пуста");
-  }
-
-  try {
-    await bot.telegram.sendMediaGroup(CHANNEL_ID, media);
-  } catch (error) {
-    throw new Error(
-      `[ERROR] Ошибка при отправке медиагруппы: ${error.message}`
-    );
-  }
-}
-
-// Функция для отправки ответа пользователю
-async function sendReply(message, text, options = {}) {
-  try {
-    const reply = await bot.telegram.sendMessage(
-      message.chat?.id || message,
-      text,
-      options
-    );
-    if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-      adminLogMessages.push(reply.message_id);
-    }
-  } catch (error) {
-    console.error("[ERROR] Ошибка при отправке ответа:", error.message);
-  }
-}
-
-async function sendReplyWithDeleteButton(message, text) {
-  try {
-    // Создаем inline-клавиатуру с кнопкой. В callback_data передаём идентификатор сообщения,
-    // по которому будем находить сообщение в очереди.
-    const inlineKeyboard = Markup.inlineKeyboard([
-      Markup.button.callback(
-        "Удалить из очереди",
-        `delete_from_queue_${message.message_id}`
-      ),
-    ]);
-
-    const reply = await bot.telegram.sendMessage(
-      message.chat?.id || message,
-      text,
-      { reply_markup: inlineKeyboard.reply_markup }
-    );
-
-    // Можно сохранять id этого уведомления для дальнейшей очистки
-    if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-      adminLogMessages.push(reply.message_id);
-    }
-  } catch (error) {
-    console.error(
-      "[ERROR] Ошибка при отправке ответа с inline-кнопкой:",
-      error.message
-    );
-  }
-}
-
-schedule.scheduleJob("0 3 * * *", async () => {
+schedule.scheduleJob("*/5 * * * *", async () => {
   console.log("[CLEAN] Запущено удаление лог-сообщений администратора");
+
+  // Получаем сохранённые идентификаторы сообщений
+  const adminLogMessages = getAdminLogMessages();
+
   console.log("[CLEAN] adminLogMessages", adminLogMessages);
 
   // Проходим по списку сохранённых идентификаторов
@@ -115,7 +49,8 @@ schedule.scheduleJob("0 3 * * *", async () => {
     }
   }
 
-  adminLogMessages.length = 0;
+  // Очищаем лог-сообщения после удаления
+  clearAdminLogMessages();
 });
 
 // Функция для получения fileId для медиафайлов
@@ -227,6 +162,11 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
 
 // Основная функция для обработки сообщений из очереди
 async function sendMessageFromQueue() {
+  if (isPaused) {
+    console.log("[PAUSE] Рассылка приостановлена");
+    return;
+  }
+
   if (queue.length === 0) {
     console.log("[QUEUE] Очередь пуста, ничего не отправляем.");
     return;
@@ -544,7 +484,30 @@ bot.action(/delete_from_queue_media_(.+)/, async (ctx) => {
   }
 });
 
+bot.action("toggle_pause", async (ctx) => {
+  isPaused = !isPaused;
+  const keyboard = Markup.inlineKeyboard([
+    Markup.button.callback(
+      isPaused ? "▶️ Возобновить" : "⏸️ Пауза",
+      "toggle_pause"
+    ),
+  ]);
+
+  try {
+    await ctx.editMessageReplyMarkup(keyboard.reply_markup);
+    await ctx.answerCbQuery(
+      isPaused ? "Рассылка приостановлена" : "Рассылка возобновлена"
+    );
+  } catch (error) {
+    console.error("Ошибка при обновлении кнопки:", error);
+  }
+});
+
 startServer();
 
 bot.launch();
-bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!");
+
+const initialKeyboard = Markup.inlineKeyboard([
+  Markup.button.callback("⏸️ Пауза", "toggle_pause"),
+]);
+bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!", initialKeyboard);
