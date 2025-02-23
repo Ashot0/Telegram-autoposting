@@ -265,65 +265,35 @@ async function sendMessageFromQueue() {
 
 async function sendPauseKeyboard(ctx) {
 	const keyboard = getPauseKeyboard();
-	const messageText = '🤖 Управление рассылкой:';
+	const messageText = '❤️'; // Пустой пробел вместо текста
 
 	try {
 		if (keyboardMessageId) {
-			// Пытаемся отредактировать существующее сообщение
-			if (ctx) {
-				await ctx.telegram.editMessageText(
-					ADMIN_ID,
-					keyboardMessageId,
-					null,
-					messageText,
-					{
-						reply_markup: keyboard.reply_markup,
-					}
-				);
-			} else {
-				await bot.telegram.editMessageText(
-					ADMIN_ID,
-					keyboardMessageId,
-					null,
-					messageText,
-					{
-						reply_markup: keyboard.reply_markup,
-					}
-				);
-			}
+			await bot.telegram.editMessageText(
+				ADMIN_ID,
+				keyboardMessageId,
+				null,
+				messageText,
+				{ reply_markup: keyboard.reply_markup }
+			);
 		} else {
-			// Отправляем новое сообщение
-			let sentMessage;
-			if (ctx) {
-				sentMessage = await ctx.reply(messageText, keyboard);
-			} else {
-				sentMessage = await bot.telegram.sendMessage(
-					ADMIN_ID,
-					messageText,
-					keyboard
-				);
-			}
+			const sentMessage = await bot.telegram.sendMessage(
+				ADMIN_ID,
+				messageText,
+				keyboard
+			);
 			keyboardMessageId = sentMessage.message_id;
 		}
 	} catch (error) {
-		if (
-			error.code === 400 &&
-			error.description.includes('message to edit not found')
-		) {
-			// Сообщение было удалено, отправляем новое
-			let sentMessage;
-			if (ctx) {
-				sentMessage = await ctx.reply(messageText, keyboard);
-			} else {
-				sentMessage = await bot.telegram.sendMessage(
-					ADMIN_ID,
-					messageText,
-					keyboard
-				);
-			}
+		if (error.description.includes('message to edit not found')) {
+			const sentMessage = await bot.telegram.sendMessage(
+				ADMIN_ID,
+				messageText,
+				keyboard
+			);
 			keyboardMessageId = sentMessage.message_id;
 		} else {
-			console.error('Ошибка при обновлении клавиатуры:', error);
+			console.error('Ошибка клавиатуры:', error);
 		}
 	}
 }
@@ -338,16 +308,23 @@ bot.on('message', async (ctx) => {
 	if (text === '⏸️ Пауза' || text === '▶️ Возобновить') {
 		isPaused = !isPaused;
 
-		// Обновляем клавиатуру в существующем сообщении
+		// Отправляем временное сообщение
+		const tempMessage = await ctx.reply(
+			isPaused ? '⏸️ Рассылка приостановлена' : '▶️ Рассылка возобновлена'
+		);
+
+		// Удаляем временное сообщение через 2 секунды
+		// setTimeout(async () => {
+		// 	try {
+		// 		await ctx.deleteMessage(tempMessage.message_id);
+		// 	} catch (error) {
+		// 		console.error('Ошибка удаления:', error);
+		// 	}
+		// }, 2000);
+
+		// Обновляем основную клавиатуру
 		await sendPauseKeyboard(ctx);
-
-		// Удаляем сообщение пользователя
-		try {
-			await ctx.deleteMessage();
-		} catch (error) {
-			console.error('Ошибка при удалении сообщения:', error);
-		}
-
+		await ctx.deleteMessage(); // Удаляем сообщение с кнопкой
 		return;
 	}
 
@@ -603,5 +580,28 @@ bot.action('toggle_pause', async (ctx) => {
 
 startServer();
 
-bot.launch();
-bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!', getPauseKeyboard());
+bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
+bot.launch().then(async () => {
+	// Отправляем начальное сообщение с текстом
+	const initialMessage = await bot.telegram.sendMessage(
+		ADMIN_ID,
+		'🤖 Управление рассылкой:',
+		getPauseKeyboard()
+	);
+
+	// Удаляем текст через 2 секунды
+	setTimeout(async () => {
+		try {
+			await bot.telegram.editMessageText(
+				ADMIN_ID,
+				initialMessage.message_id,
+				null,
+				' ', // Заменяем на пробел
+				{ reply_markup: getPauseKeyboard().reply_markup }
+			);
+			keyboardMessageId = initialMessage.message_id;
+		} catch (error) {
+			console.error('Ошибка редактирования:', error);
+		}
+	}, 2000);
+});
