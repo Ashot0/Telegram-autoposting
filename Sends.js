@@ -43,6 +43,9 @@ async function sendMediaGroup(media) {
 
 // Функция для отправки текстового ответа
 async function sendReply(message, text, options = {}) {
+  if (message && message.message_id) {
+    options.reply_to_message_id = message.message_id;
+  }
   try {
     const reply = await bot.telegram.sendMessage(
       message.chat?.id || message,
@@ -53,21 +56,6 @@ async function sendReply(message, text, options = {}) {
       adminLogMessages.push(reply.message_id);
     }
     
-  } catch (error) {
-    console.error("[ERROR] Ошибка при отправке ответа:", error.message);
-  }
-}
-
-async function sendReply(message, text, options = {}) {
-  try {
-    const reply = await bot.telegram.sendMessage(
-      message.chat?.id || message,
-      text,
-      options
-    );
-    if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-      adminLogMessages.push(reply.message_id);
-    }
     return reply; // Возвращаем отправленное сообщение
   } catch (error) {
     console.error("[ERROR] Ошибка при отправке ответа:", error.message);
@@ -84,11 +72,16 @@ async function sendReplyWithDeleteButton(message, text) {
       ),
     ]);
 
-    const reply = await bot.telegram.sendMessage(
-      message.chat?.id || message,
-      text,
-      { reply_markup: inlineKeyboard.reply_markup }
-    );
+     const options = { reply_markup: inlineKeyboard.reply_markup };
+     if (message && message.message_id) {
+       options.reply_to_message_id = message.message_id;
+     }
+     
+     const reply = await bot.telegram.sendMessage(
+       message.chat?.id || message,
+       text,
+       options
+     );
 
     if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
       adminLogMessages.push(reply.message_id);

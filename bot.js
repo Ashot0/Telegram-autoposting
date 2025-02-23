@@ -29,7 +29,7 @@ const {
 } = require("./Sends");
 // Функция для отправки обычного сообщения
 
-schedule.scheduleJob("*/5 * * * *", async () => {
+schedule.scheduleJob("0 3 * * *", async () => {
   console.log("[CLEAN] Запущено удаление лог-сообщений администратора");
 
   // Получаем сохранённые идентификаторы сообщений
@@ -79,6 +79,16 @@ function isMediaGroupDuplicate(newMedia) {
     // Сравниваем каждый fileId
     return newFileIds.every((id, index) => id === taskFileIds[index]);
   });
+}
+
+function getPauseKeyboard() {
+  return isPaused
+    ? Markup.keyboard([["▶️ Возобновить"]])
+        .resize()
+        .oneTime()
+    : Markup.keyboard([["⏸️ Пауза"]])
+        .resize()
+        .oneTime();
 }
 
 // Функция для обработки медиагруппы
@@ -171,6 +181,7 @@ async function sendMessageFromQueue() {
     console.log("[QUEUE] Очередь пуста, ничего не отправляем.");
     return;
   }
+  
 
   const task = queue.shift();
   console.log(
@@ -256,6 +267,19 @@ schedule.scheduleJob(SEND_TIMER, sendMessageFromQueue);
 
 bot.on("message", async (ctx) => {
   if (ctx.chat.id !== ADMIN_ID) return;
+
+  // Фильтруем сообщения-команды, чтобы они не попадали в очередь
+  const text = ctx.message.text;
+  if (text === "⏸️ Пауза" || text === "▶️ Возобновить") {
+    isPaused = !isPaused;
+
+    // Отправляем подтверждение с обновлённой клавиатурой
+    await ctx.reply(
+      isPaused ? "⏸️ Рассылка приостановлена" : "▶️ Рассылка возобновлена",
+      getPauseKeyboard()
+    );
+    return; // Не обрабатываем команду как обычное сообщение
+  }
 
   setTimeout(() => {
     const { message } = ctx;
@@ -496,18 +520,15 @@ bot.action("toggle_pause", async (ctx) => {
   try {
     await ctx.editMessageReplyMarkup(keyboard.reply_markup);
     await ctx.answerCbQuery(
-      isPaused ? "Рассылка приостановлена" : "Рассылка возобновлена"
+      isPaused ? "⏸️ Рассылка приостановлена" : "▶️ Рассылка возобновлена"
     );
   } catch (error) {
     console.error("Ошибка при обновлении кнопки:", error);
   }
 });
 
+
 startServer();
 
 bot.launch();
-
-const initialKeyboard = Markup.inlineKeyboard([
-  Markup.button.callback("⏸️ Пауза", "toggle_pause"),
-]);
-bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!", initialKeyboard);
+bot.telegram.sendMessage(ADMIN_ID, "🤖 Бот запущен!", getPauseKeyboard());
