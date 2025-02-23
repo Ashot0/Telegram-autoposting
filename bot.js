@@ -2,7 +2,7 @@ const { Telegraf } = require("telegraf");
 const schedule = require("node-schedule");
 const punycode = require("punycode/");
 const moment = require("moment");
-
+const { Markup } = require("telegraf");
 const {
   BOT_TOKEN,
   CHANNEL_ID,
@@ -55,17 +55,47 @@ async function sendMediaGroup(media) {
 }
 
 // Функция для отправки ответа пользователю
-async function sendReply(message, text) {
+async function sendReply(message, text, options = {}) {
   try {
-    await bot.telegram
-      .sendMessage(message.chat?.id || message, text)
-      .then((reply) => {
-        if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-          adminLogMessages.push(reply.message_id);
-        }
-      });
+    const reply = await bot.telegram.sendMessage(
+      message.chat?.id || message,
+      text,
+      options
+    );
+    if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
+      adminLogMessages.push(reply.message_id);
+    }
   } catch (error) {
     console.error("[ERROR] Ошибка при отправке ответа:", error.message);
+  }
+}
+
+async function sendReplyWithDeleteButton(message, text) {
+  try {
+    // Создаем inline-клавиатуру с кнопкой. В callback_data передаём идентификатор сообщения,
+    // по которому будем находить сообщение в очереди.
+    const inlineKeyboard = Markup.inlineKeyboard([
+      Markup.button.callback(
+        "Удалить из очереди",
+        `delete_from_queue_${message.message_id}`
+      ),
+    ]);
+
+    const reply = await bot.telegram.sendMessage(
+      message.chat?.id || message,
+      text,
+      { reply_markup: inlineKeyboard.reply_markup }
+    );
+
+    // Можно сохранять id этого уведомления для дальнейшей очистки
+    if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
+      adminLogMessages.push(reply.message_id);
+    }
+  } catch (error) {
+    console.error(
+      "[ERROR] Ошибка при отправке ответа с inline-кнопкой:",
+      error.message
+    );
   }
 }
 
@@ -173,9 +203,21 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
         queue.push({
           chatId: message.chat.id,
           media: groupMedia,
+          mediaGroupId: mediaGroupId,
         });
         mediaGroups.delete(mediaGroupId);
-        await sendReply(message, "✅ Медиафайлы добавлены в очередь.");
+        const inlineKeyboard = Markup.inlineKeyboard([
+          Markup.button.callback(
+            "Удалить медиагруппу из очереди",
+            `delete_from_queue_media_${mediaGroupId}`
+          ),
+        ]);
+
+        await sendReply(
+          message,
+          "✅ Медиафайлы добавлены в очередь.",
+          inlineKeyboard
+        );
       }
     }, 2000);
   } else {
@@ -259,7 +301,7 @@ async function sendMessageFromQueue() {
         );
       }
     }
-    
+
     sendReply(
       ADMIN_ID,
       `✅ Сообщение переслано и удалено! В очереди ${queue.length}`
@@ -394,7 +436,7 @@ bot.on("message", async (ctx) => {
           },
         ],
       });
-      sendReply(message, "✅ Сообщение добавлено в очередь.");
+      sendReplyWithDeleteButton(message, "✅ Сообщение добавлено в очередь.");
     }
   }, SEND_COOLDOWN);
 });
@@ -436,6 +478,69 @@ bot.on("edited_message", async (ctx) => {
     console.log(
       `[ERROR] Редактированное сообщение ${messageId} не найдено в очереди.`
     );
+  }
+});
+
+bot.action(/delete_from_queue_(\d+)/, async (ctx) => {
+  const messageIdToDelete = Number(ctx.match[1]);
+
+  // Ищем задание по message_id в очереди
+  const taskIndex = queue.findIndex(
+    (task) => task.media[0].messageId === messageIdToDelete
+  );
+
+  if (taskIndex !== -1) {
+    // Удаляем задание из очереди
+    queue.splice(taskIndex, 1);
+
+    // Опционально: удаляем уведомление из чата администратора
+    try {
+      await bot.telegram.deleteMessage(ctx.chat.id, messageIdToDelete);
+      console.log(`Сообщение ${messageIdToDelete} удалено из очереди.`);
+    } catch (error) {
+      console.error(
+        `Ошибка при удалении сообщения ${messageIdToDelete}: ${error.message}`
+      );
+    }
+
+    // Подтверждаем действие администратору
+    await ctx.answerCbQuery("Сообщение удалено из очереди.");
+  } else {
+    await ctx.answerCbQuery("Сообщение не найдено в очереди.");
+  }
+});
+
+bot.action(/delete_from_queue_media_(.+)/, async (ctx) => {
+  const mediaGroupId = ctx.match[1];
+  // Ищем задачу в очереди по mediaGroupId
+  const taskIndex = queue.findIndex(
+    (task) => task.mediaGroupId === mediaGroupId
+  );
+
+  if (taskIndex !== -1) {
+    const task = queue[taskIndex];
+    // Удаляем задачу из очереди
+    queue.splice(taskIndex, 1);
+
+    // Удаляем все исходные сообщения медиагруппы из чата администратора
+    for (const mediaItem of task.media) {
+      if (mediaItem.messageId) {
+        try {
+          await bot.telegram.deleteMessage(task.chatId, mediaItem.messageId);
+          console.log(
+            `[DELETE] Удалено сообщение медиагруппы: ${mediaItem.messageId}`
+          );
+        } catch (error) {
+          console.error(
+            `[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
+          );
+        }
+      }
+    }
+
+    await ctx.answerCbQuery("Медиагруппа удалена из очереди.");
+  } else {
+    await ctx.answerCbQuery("Медиагруппа не найдена в очереди.");
   }
 });
 
