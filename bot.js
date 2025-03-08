@@ -4,6 +4,8 @@ const schedule = require('node-schedule');
 const punycode = require('punycode/');
 const moment = require('moment');
 const { startServer } = require('./server');
+const { scheduleMessage } = require('./scheduler');
+
 const {
 	BOT_TOKEN,
 	CHANNEL_ID,
@@ -308,20 +310,6 @@ bot.on('message', async (ctx) => {
 	if (text === '⏸️ Пауза' || text === '▶️ Возобновить') {
 		isPaused = !isPaused;
 
-		// Отправляем временное сообщение
-		const tempMessage = await ctx.reply(
-			isPaused ? '⏸️ Рассылка приостановлена' : '▶️ Рассылка возобновлена'
-		);
-
-		// Удаляем временное сообщение через 2 секунды
-		// setTimeout(async () => {
-		// 	try {
-		// 		await ctx.deleteMessage(tempMessage.message_id);
-		// 	} catch (error) {
-		// 		console.error('Ошибка удаления:', error);
-		// 	}
-		// }, 2000);
-
 		// Обновляем основную клавиатуру
 		await sendPauseKeyboard(ctx);
 		await ctx.deleteMessage(); // Удаляем сообщение с кнопкой
@@ -365,64 +353,8 @@ bot.on('message', async (ctx) => {
 		const match = caption.match(dateRegex);
 
 		if (match) {
-			const [_, day, month, year, hour, minute] = match;
-			const processedContent = caption.replace(dateRegex, '').trim();
-
-			// Дата отправки
-
-			const sendDate = moment(
-				`${year}-${month}-${day} ${hour}:${minute}`,
-				'YYYY-MM-DD HH:mm'
-			).utcOffset(TIME_ZONE, true);
-
-			// Отображаемая дата
-			sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
-
-			const delay = sendDate.diff(moment(), 'milliseconds');
-
-			if (delay > 0) {
-				schedule.scheduleJob(sendDate.toDate(), async () => {
-					if (mediaGroupId) {
-						const groupMedia = mediaGroups.get(mediaGroupId);
-						if (groupMedia && groupMedia.length > 0) {
-							await sendMediaGroup(groupMedia);
-							setTimeout(() => {
-								mediaGroups.delete(mediaGroupId);
-							}, 5000);
-						}
-					} else {
-						if (message.caption) {
-							await sendMessage(
-								message.chat.id,
-								message.message_id,
-								processedContent,
-								message.caption_entities || message.entities || undefined,
-								message.show_caption_above_media || undefined,
-								message.has_media_spoiler || undefined
-							);
-						} else if (message.text) {
-							await bot.telegram.sendMessage(CHANNEL_ID, processedContent);
-						}
-						try {
-							await bot.telegram.deleteMessage(
-								message.chat.id,
-								message.message_id
-							);
-
-							console.log(
-								`[DELETE] Одиночное сообщение удалено: ${message.message_id}`
-							);
-						} catch (error) {
-							console.error(
-								`[ERROR] Ошибка при удалении ${message.message_id}: ${error.message}`
-							);
-						}
-					}
-					sendReply(message, '✅ Сообщение отправлено по расписанию!');
-				});
-			} else {
-				sendReply(message, '❌ Указанная дата уже прошла.');
-			}
+			scheduleMessage(message, match, mediaGroupId, bot);
+			return;
 		} else if (mediaGroupId) {
 			// Обработка медиагруппы
 			if (!mediaGroups.has(mediaGroupId)) {
