@@ -13,14 +13,7 @@ const {
 	keyboardMessageId,
 } = require('./managers/pauseManager');
 
-const {
-	BOT_TOKEN,
-	CHANNEL_ID,
-	ADMIN_ID,
-	SEND_TIMER,
-	SEND_COOLDOWN,
-	TIME_ZONE,
-} = require('./config');
+const { BOT_TOKEN, ADMIN_ID, SEND_TIMER, SEND_COOLDOWN } = require('./config');
 
 const {
 	sendMessage,
@@ -342,7 +335,7 @@ bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
 	const initialMessage = await bot.telegram.sendMessage(
 		ADMIN_ID,
-		'🤖 Управление рассылкой:',
+		'❤️',
 		getPauseKeyboard() // Используем функцию из модуля
 	);
 	keyboardMessageId = initialMessage.message_id; // Используем сеттер
