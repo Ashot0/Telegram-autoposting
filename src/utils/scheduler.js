@@ -1,7 +1,7 @@
 const schedule = require('node-schedule');
 const moment = require('moment');
-const { CHANNEL_ID, ADMIN_ID, TIME_ZONE } = require('./config');
-const { sendMediaGroup, sendMessage, sendReply } = require('./Sends');
+const { CHANNEL_ID, ADMIN_ID, TIME_ZONE } = require('../config');
+const { sendMediaGroup, sendMessage, sendReply } = require('../services/Sends');
 
 async function scheduleMessage(message, match, mediaGroupId, bot) {
 	const [_, day, month, year, hour, minute] = match;
