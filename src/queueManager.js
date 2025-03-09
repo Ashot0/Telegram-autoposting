@@ -32,87 +32,90 @@ class QueueManager {
 
 	async processMediaGroup(message, mediaGroupId, mediaArray) {
 		if (this.processingGroups.has(mediaGroupId)) {
-			return; // Уже обрабатывается
+			console.log(
+				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} уже обрабатывается.`
+			);
+			return;
 		}
 		this.processingGroups.add(mediaGroupId);
 
-		const mediaType = ['photo', 'video', 'document', 'audio'].find(
-			(type) => message[type]
-		);
+		try {
+			console.log(`[MEDIA GROUP] Начало обработки медиагруппы ${mediaGroupId}`);
 
-		const fileId = getFileId(message);
-		if (!fileId) {
-			sendReply(message, '❌ Не удалось получить file_id для медиа');
-			return;
-		}
-		if (fileId) {
-			mediaArray.push({
-				type: mediaType,
-				media: fileId,
-				messageId: message.message_id,
-				has_media_spoiler: message.has_media_spoiler || false,
-				caption:
-					mediaArray.length === 0
-						? message.caption || message.text || ''
-						: undefined,
-				caption_entities:
-					mediaArray.length === 0 ? message.caption_entities : undefined,
-				show_caption_above_media:
-					mediaArray.length === 0 ? message.show_caption_above_media : false,
+			// Ждём 3 секунды, чтобы собрать все сообщения группы
+			await new Promise((resolve) => setTimeout(resolve, 3000));
+
+			const groupMedia = this.mediaGroups.get(mediaGroupId);
+			if (!groupMedia || groupMedia.length === 0) {
+				console.log(`[MEDIA GROUP] Медиагруппа ${mediaGroupId} пуста.`);
+				return;
+			}
+
+			console.log(
+				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} содержит ${groupMedia.length} файлов.`
+			);
+
+			// Проверка на дубликаты
+			const exists = await QueueTask.findOne({ mediaGroupId });
+			if (exists) {
+				console.log(`[MEDIA GROUP] Медиагруппа ${mediaGroupId} уже в очереди.`);
+				await this.cleanupMediaGroup(message, groupMedia);
+				return;
+			}
+
+			// Сохраняем медиагруппу в базу данных
+			const task = new QueueTask({
+				chatId: message.chat.id,
+				media: groupMedia,
+				mediaGroupId,
 			});
+			await task.save();
+			console.log(
+				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} сохранена в базу данных.`
+			);
 
-			setTimeout(async () => {
-				const groupMedia = this.mediaGroups.get(mediaGroupId);
-				if (groupMedia?.length > 0) {
-					if (await this.isMediaGroupDuplicate(groupMedia)) {
-						for (const mediaItem of groupMedia) {
-							try {
-								await bot.telegram.deleteMessage(
-									message.chat.id,
-									mediaItem.messageId
-								);
-							} catch (error) {}
-						}
-						await sendReply(
-							message,
-							'❌ Медиагруппа уже в очереди. Сообщения удалены.'
-						);
-						this.mediaGroups.delete(mediaGroupId);
-						return;
-					}
-					try {
-						const task = new QueueTask({
-							chatId: message.chat.id,
-							media: groupMedia,
-							mediaGroupId,
-							createdAt: new Date(),
-						});
-						await task.save();
-
-						this.mediaGroups.delete(mediaGroupId);
-						const inlineKeyboard = Markup.inlineKeyboard([
-							Markup.button.callback(
-								'Удалить медиагруппу из очереди',
-								`delete_from_queue_media_${mediaGroupId}`
-							),
-						]);
-						await sendReply(
-							message,
-							'✅ Медиафайлы добавлены в очередь.',
-							inlineKeyboard
-						);
-					} catch (error) {
-						if (error.code === 11000) {
-							// Ошибка дубликата
-							await this.cleanupMediaGroup(message, groupMedia);
-						}
-					} finally {
-						this.processingGroups.delete(mediaGroupId);
-					}
+			// Удаляем сообщения из чата
+			for (const mediaItem of groupMedia) {
+				try {
+					await bot.telegram.deleteMessage(
+						message.chat.id,
+						mediaItem.messageId
+					);
+					console.log(
+						`[DELETE] Удалено сообщение медиагруппы: ${mediaItem.messageId}`
+					);
+				} catch (error) {
+					console.error(
+						`[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
+					);
 				}
-			}, 5000);
-		} else {
-			sendReply(message, '❌ Ошибка: Не удалось определить `file_id`.');
+			}
+
+			// Отправляем уведомление
+			const inlineKeyboard = Markup.inlineKeyboard([
+				Markup.button.callback(
+					'Удалить медиагруппу из очереди',
+					`delete_from_queue_media_${mediaGroupId}`
+				),
+			]);
+			await sendReply(
+				message,
+				'✅ Медиафайлы добавлены в очередь.',
+				inlineKeyboard
+			);
+			console.log(
+				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} успешно обработана.`
+			);
+
+			// Очищаем временные данные
+			this.mediaGroups.delete(mediaGroupId);
+		} catch (error) {
+			console.error(
+				`[ERROR] Ошибка при обработке медиагруппы ${mediaGroupId}: ${error.message}`
+			);
+			await sendReply(message, '❌ Ошибка при обработке медиагруппы.');
+		} finally {
+			this.processingGroups.delete(mediaGroupId);
 		}
 	}
 
@@ -195,10 +198,39 @@ class QueueManager {
 	}
 
 	async updateTask(updatedTask) {
-		await QueueTask.updateOne(
-			{ _id: updatedTask._id }, // Ищем задачу по её ID
-			{ $set: { media: updatedTask.media } } // Обновляем поле media
+		try {
+			await QueueTask.updateOne(
+				{ _id: updatedTask._id },
+				{ $set: { media: updatedTask.media } }
+			);
+			console.log(`[UPDATE] Задача ${updatedTask._id} обновлена.`);
+		} catch (error) {
+			console.error(`[ERROR] Ошибка обновления задачи: ${error.message}`);
+			throw error;
+		}
+	}
+
+	async cleanupMediaGroup(message, groupMedia) {
+		console.log(`[CLEANUP] Удаление дубликата медиагруппы.`);
+
+		for (const mediaItem of groupMedia) {
+			try {
+				await bot.telegram.deleteMessage(message.chat.id, mediaItem.messageId);
+				console.log(
+					`[DELETE] Удалено сообщение медиагруппы: ${mediaItem.messageId}`
+				);
+			} catch (error) {
+				console.error(
+					`[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
+				);
+			}
+		}
+
+		await sendReply(
+			message,
+			'❌ Медиагруппа уже в очереди. Сообщения удалены.'
 		);
+		console.log(`[CLEANUP] Медиагруппа успешно удалена.`);
 	}
 }
 

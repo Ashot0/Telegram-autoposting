@@ -74,6 +74,7 @@ bot.on('message', async (ctx) => {
 			);
 			if (isDuplicate) {
 				await sendReply(message, '❌ Этот файл уже в очереди.');
+				await bot.telegram.deleteMessage(ADMIN_ID, ctx.message.message_id);
 				return;
 			}
 		}
@@ -89,9 +90,8 @@ bot.on('message', async (ctx) => {
 		);
 
 		if (isMessageInQueue) {
-			await sendReply(message, '❌ Сообщение уже в очереди.').then(() =>
-				bot.telegram.deleteMessage(message.chat.id, message.message_id)
-			);
+			await sendReply(message, '❌ Сообщение уже в очереди.');
+			await bot.telegram.deleteMessage(message.chat.id, message.message_id);
 			return;
 		}
 
@@ -101,14 +101,27 @@ bot.on('message', async (ctx) => {
 		if (match) {
 			scheduleMessage(message, match, mediaGroupId, bot);
 		} else if (mediaGroupId) {
-			if (!(await queueManager.mediaGroups.has(mediaGroupId)))
-				await queueManager.mediaGroups.set(mediaGroupId, []);
-			await new Promise((resolve) => setTimeout(resolve, 2000));
-			await queueManager.processMediaGroup(
-				message,
-				mediaGroupId,
-				await queueManager.mediaGroups.get(mediaGroupId)
-			);
+			if (!queueManager.mediaGroups.has(mediaGroupId)) {
+				queueManager.mediaGroups.set(mediaGroupId, []);
+			}
+
+			// Добавляем сообщение в группу
+			queueManager.mediaGroups.get(mediaGroupId).push({
+				type: ['photo', 'video', 'document', 'audio'].find(
+					(type) => message[type]
+				),
+				media: getFileId(message),
+				messageId: message.message_id,
+				caption: message.caption,
+				caption_entities: message.caption_entities,
+				show_caption_above_media: message.show_caption_above_media,
+				has_media_spoiler: message.has_media_spoiler || false,
+			});
+
+			// Запускаем обработку только для первого сообщения в группе
+			if (queueManager.mediaGroups.get(mediaGroupId).length === 1) {
+				await queueManager.processMediaGroup(message, mediaGroupId);
+			}
 		} else if (newMessageFileId) {
 			await queueManager.addToQueue({
 				chatId: message.chat.id,
@@ -156,6 +169,7 @@ bot.on('message', async (ctx) => {
 
 bot.on('edited_message', async (ctx) => {
 	if (ctx.chat.id !== ADMIN_ID) return;
+
 	const editedMessage = ctx.update.edited_message;
 
 	if (!editedMessage?.chat || editedMessage.chat.id !== ADMIN_ID) {
@@ -169,25 +183,30 @@ bot.on('edited_message', async (ctx) => {
 	const queue = await queueManager.getQueue();
 
 	// Ищем задачу в очереди по messageId
-	const taskIndex = queue.findIndex(
-		(task) => task.media[0].messageId === messageId
+	const taskIndex = queue.findIndex((task) =>
+		task.media.some((media) => media.messageId === messageId)
 	);
 
 	if (taskIndex !== -1) {
-		// Обновляем данные задачи
 		const task = queue[taskIndex];
-		task.media[0].caption = editedMessage.caption || editedMessage.text || '';
-		task.media[0].fileId = getFileId(editedMessage);
-		task.media[0].caption_entities = editedMessage.caption_entities || '';
-		task.media[0].show_caption_above_media =
-			editedMessage.show_caption_above_media || false;
-		task.media[0].has_media_spoiler = editedMessage.has_media_spoiler || false;
+
+		// Обновляем все элементы медиагруппы
+		task.media.forEach((mediaItem) => {
+			if (mediaItem.messageId === messageId) {
+				mediaItem.caption = editedMessage.caption || editedMessage.text || '';
+				mediaItem.fileId = getFileId(editedMessage);
+				mediaItem.caption_entities = editedMessage.caption_entities || '';
+				mediaItem.show_caption_above_media =
+					editedMessage.show_caption_above_media || false;
+				mediaItem.has_media_spoiler = editedMessage.has_media_spoiler || false;
+			}
+		});
 
 		// Сохраняем обновлённую задачу в базе данных
 		await queueManager.updateTask(task);
 
 		// Уведомляем администратора
-		sendReply(ADMIN_ID, 'Сообщение обновлено в очереди.');
+		await sendReply(ADMIN_ID, 'Сообщение обновлено в очереди.');
 		console.log(`[EDITED] Сообщение ${messageId} обновлено в очереди.`);
 	} else {
 		console.log(
