@@ -7,7 +7,6 @@ const state = {
 	keyboardMessageId: null,
 };
 
-// Заменяем геттер на функцию
 function getIsPaused() {
 	return state.isPaused;
 }
