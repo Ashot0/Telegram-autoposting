@@ -232,6 +232,11 @@ class QueueManager {
 		);
 		console.log(`[CLEANUP] Медиагруппа успешно удалена.`);
 	}
+
+	async removeMediaGroupFromQueue(mediaGroupId) {
+		const task = await QueueTask.findOneAndDelete({ mediaGroupId });
+		return task;
+	}
 }
 
 module.exports = QueueManager;
