@@ -54,8 +54,7 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 			}
 
 			await bot.telegram.deleteMessage(message.chat.id, message.message_id);
-			scheduledMessage.status = 'sent';
-			await scheduledMessage.save();
+			await ScheduledMessage.deleteOne({ _id: scheduledMessage._id });
 		} catch (error) {
 			console.error(`Ошибка при отправке: ${error.message}`);
 			scheduledMessage.status = 'failed';
@@ -104,8 +103,7 @@ async function restoreScheduledMessages(bot) {
 					);
 				}
 
-				msg.status = 'sent';
-				await msg.save();
+				await ScheduledMessage.deleteOne({ _id: msg._id });
 			} catch (error) {
 				msg.status = 'failed';
 				await msg.save();
