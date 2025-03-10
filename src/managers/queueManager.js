@@ -1,10 +1,10 @@
 const { Markup } = require('telegraf');
-const { getFileId } = require('./utils/getFileId');
-const { sendReply } = require('./services/Sends');
-const { getIsPaused } = require('./managers/pauseManager');
-const QueueTask = require('./models/QueueTask');
-const { connect } = require('./db');
-const { ADMIN_ID } = require('./config');
+const { getFileId } = require('../utils/getFileId');
+const { sendReply } = require('../services/Sends');
+const { getIsPaused } = require('./pauseManager');
+const QueueTask = require('../models/QueueTask');
+const { connect } = require('../db');
+const { ADMIN_ID } = require('../config');
 
 class QueueManager {
 	constructor() {

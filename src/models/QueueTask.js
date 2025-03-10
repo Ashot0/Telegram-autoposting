@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { MONGODB_COLLECTION } = require('../config');
 
 const mediaSchema = new mongoose.Schema({
 	type: {
@@ -29,7 +30,7 @@ const queueTaskSchema = new mongoose.Schema(
 		},
 		createdAt: { type: Date, default: Date.now },
 	},
-	{ collection: 'Kavunchik' }
+	{ collection: MONGODB_COLLECTION }
 );
 
 module.exports = mongoose.model('QueueTask', queueTaskSchema);

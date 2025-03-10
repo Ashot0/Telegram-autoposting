@@ -5,6 +5,7 @@ const { scheduleMessage } = require('./utils/scheduler');
 const { setupCleanup } = require('./utils/cleanup');
 const { getFileId } = require('./utils/getFileId');
 const QueueTask = require('./models/QueueTask');
+const QueueManager = require('./managers/queueManager');
 const {
 	getPauseKeyboard,
 	sendPauseKeyboard,
@@ -12,9 +13,6 @@ const {
 	togglePause,
 	keyboardMessageId,
 } = require('./managers/pauseManager');
-
-const { BOT_TOKEN, ADMIN_ID, SEND_TIMER, SEND_COOLDOWN } = require('./config');
-
 const {
 	sendMessage,
 	sendMediaGroup,
@@ -24,7 +22,7 @@ const {
 	clearAdminLogMessages,
 } = require('./services/Sends');
 
-const QueueManager = require('./queueManager');
+const { BOT_TOKEN, ADMIN_ID, SEND_TIMER, SEND_COOLDOWN } = require('./config');
 
 const bot = new Telegraf(BOT_TOKEN);
 const queueManager = new QueueManager();
