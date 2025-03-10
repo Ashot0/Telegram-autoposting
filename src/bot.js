@@ -1,12 +1,15 @@
-const { Telegraf, Markup } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const schedule = require('node-schedule');
+
 const { startServer } = require('./server/server');
+
 const { scheduleMessage } = require('./utils/scheduler');
 const { setupCleanup } = require('./utils/cleanup');
 const { getFileId } = require('./utils/getFileId');
-const QueueTask = require('./models/QueueTask');
-const QueueManager = require('./managers/queueManager');
+
 const setupDeleteHandlers = require('./handlers/deleteHandlers');
+const setupEditedMessageHandler = require('./handlers/editedMessageHandler');
+
 const {
 	getPauseKeyboard,
 	sendPauseKeyboard,
@@ -14,13 +17,13 @@ const {
 	togglePause,
 	keyboardMessageId,
 } = require('./managers/pauseManager');
+const QueueManager = require('./managers/queueManager');
+
 const {
 	sendMessage,
 	sendMediaGroup,
 	sendReply,
 	sendReplyWithDeleteButton,
-	getAdminLogMessages,
-	clearAdminLogMessages,
 } = require('./services/Sends');
 
 const { BOT_TOKEN, ADMIN_ID, SEND_TIMER, SEND_COOLDOWN } = require('./config');
@@ -34,6 +37,7 @@ setupCleanup(schedule, bot, ADMIN_ID);
 // Регистрация обработчиков паузы
 registerPauseHandlers(bot);
 
+// Инициализация отправки из очереди
 schedule.scheduleJob(SEND_TIMER, async () => {
 	await queueManager.sendMessageFromQueue(
 		bot,
@@ -42,6 +46,15 @@ schedule.scheduleJob(SEND_TIMER, async () => {
 		sendMessage
 	);
 });
+
+// Запуск сервера
+startServer();
+
+// Отслеживание удалений
+setupDeleteHandlers(bot, queueManager);
+
+// Отслеживание редактирования сообщений
+setupEditedMessageHandler(bot, queueManager);
 
 bot.on('message', async (ctx) => {
 	if (ctx.chat.id !== ADMIN_ID) return;
@@ -160,65 +173,14 @@ bot.on('message', async (ctx) => {
 	if (!keyboardMessageId) await sendPauseKeyboard(bot, ADMIN_ID);
 });
 
-bot.on('edited_message', async (ctx) => {
-	if (ctx.chat.id !== ADMIN_ID) return;
-
-	const editedMessage = ctx.update.edited_message;
-
-	if (!editedMessage?.chat || editedMessage.chat.id !== ADMIN_ID) {
-		console.error('[ERROR] editedMessage или chat не определены');
-		return;
-	}
-
-	const messageId = editedMessage.message_id;
-
-	// Получаем очередь из базы данных
-	const queue = await queueManager.getQueue();
-
-	// Ищем задачу в очереди по messageId
-	const taskIndex = queue.findIndex((task) =>
-		task.media.some((media) => media.messageId === messageId)
-	);
-
-	if (taskIndex !== -1) {
-		const task = queue[taskIndex];
-
-		// Обновляем все элементы медиагруппы
-		task.media.forEach((mediaItem) => {
-			if (mediaItem.messageId === messageId) {
-				mediaItem.caption = editedMessage.caption || editedMessage.text || '';
-				mediaItem.fileId = getFileId(editedMessage);
-				mediaItem.caption_entities = editedMessage.caption_entities || '';
-				mediaItem.show_caption_above_media =
-					editedMessage.show_caption_above_media || false;
-				mediaItem.has_media_spoiler = editedMessage.has_media_spoiler || false;
-			}
-		});
-
-		// Сохраняем обновлённую задачу в базе данных
-		await queueManager.updateTask(task);
-
-		// Уведомляем администратора
-		await sendReply(ADMIN_ID, 'Сообщение обновлено в очереди.');
-		console.log(`[EDITED] Сообщение ${messageId} обновлено в очереди.`);
-	} else {
-		console.log(
-			`[ERROR] Редактированное сообщение ${messageId} не найдено в очереди.`
-		);
-	}
-});
-
-startServer();
-setupDeleteHandlers(bot, queueManager);
-
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
 	const initialMessage = await bot.telegram.sendMessage(
 		ADMIN_ID,
 		'❤️',
-		getPauseKeyboard() // Используем функцию из модуля
+		getPauseKeyboard()
 	);
-	keyboardMessageId = initialMessage.message_id; // Используем сеттер
+	keyboardMessageId = initialMessage.message_id;
 
 	await sendPauseKeyboard(bot, ADMIN_ID);
 
