@@ -13,11 +13,7 @@ const scheduledMessageSchema = new mongoose.Schema(
 		},
 		createdAt: { type: Date, default: Date.now },
 	},
-	{ collection: 'scheduled_messages' }
+	{ collection: MONGODB_SCHEDULED_MESSAGE_COLLECTION }
 );
 
-module.exports = mongoose.model(
-	'ScheduledMessage',
-	scheduledMessageSchema,
-	MONGODB_SCHEDULED_MESSAGE_COLLECTION
-);
+module.exports = mongoose.model('ScheduledMessage', scheduledMessageSchema);
