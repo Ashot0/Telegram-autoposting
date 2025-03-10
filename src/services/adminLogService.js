@@ -1,4 +1,4 @@
-const AdminLog = require('../models/AdminLog');
+const AdminLog = require('../models/AdminLogMessage');
 
 // Добавление сообщения в лог
 async function addAdminLogMessage(messageId) {

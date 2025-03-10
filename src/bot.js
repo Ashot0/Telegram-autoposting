@@ -28,13 +28,7 @@ const bot = new Telegraf(BOT_TOKEN);
 const queueManager = new QueueManager();
 
 // Инициализация очистки
-setupCleanup(
-	schedule,
-	bot,
-	ADMIN_ID,
-	getAdminLogMessages,
-	clearAdminLogMessages
-);
+setupCleanup(schedule, bot, ADMIN_ID);
 
 // Регистрация обработчиков паузы
 registerPauseHandlers(bot);

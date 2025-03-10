@@ -1,10 +1,13 @@
 const { Telegraf } = require('telegraf');
 const { Markup } = require('telegraf');
 const { CHANNEL_ID, ADMIN_ID, BOT_TOKEN } = require('../config');
+const {
+	addAdminLogMessage,
+	getAdminLogMessages,
+	clearAdminLogMessages,
+} = require('./adminLogService');
 
 const bot = new Telegraf(BOT_TOKEN);
-
-let adminLogMessages = [];
 
 // Функция для отправки обычного сообщения (копирование)
 async function sendMessage(
@@ -52,17 +55,17 @@ async function sendReply(message, text, options = {}) {
 			text,
 			options
 		);
+
 		if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-			adminLogMessages.push(reply.message_id);
+			await addAdminLogMessage(reply.message_id); // Используем новую функцию
 		}
 
-		return reply; // Возвращаем отправленное сообщение
+		return reply;
 	} catch (error) {
 		console.error('[ERROR] Ошибка при отправке ответа:', error.message);
 	}
 }
 
-// Функция для отправки ответа с inline-кнопкой (для удаления)
 async function sendReplyWithDeleteButton(message, text) {
 	try {
 		const inlineKeyboard = Markup.inlineKeyboard([
@@ -84,7 +87,7 @@ async function sendReplyWithDeleteButton(message, text) {
 		);
 
 		if (message.chat?.id === ADMIN_ID || message === ADMIN_ID) {
-			adminLogMessages.push(reply.message_id);
+			await addAdminLogMessage(reply.message_id); // Используем новую функцию
 		}
 	} catch (error) {
 		console.error(
@@ -94,21 +97,11 @@ async function sendReplyWithDeleteButton(message, text) {
 	}
 }
 
-// Геттер для сохраненных ID лог-сообщений администратора
-function getAdminLogMessages() {
-	return adminLogMessages;
-}
-
-// Функция очистки лог-сообщений
-function clearAdminLogMessages() {
-	adminLogMessages.length = 0;
-}
-
 module.exports = {
 	sendMessage,
 	sendMediaGroup,
 	sendReply,
 	sendReplyWithDeleteButton,
-	getAdminLogMessages,
-	clearAdminLogMessages,
+	getAdminLogMessages, // Используем новую функцию
+	clearAdminLogMessages, // Используем новую функцию
 };
