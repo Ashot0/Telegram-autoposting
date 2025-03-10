@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { MONGODB_SCHEDULED_MESSAGE_COLLECTION } = require('../config');
 
 const scheduledMessageSchema = new mongoose.Schema(
 	{
@@ -15,4 +16,8 @@ const scheduledMessageSchema = new mongoose.Schema(
 	{ collection: 'scheduled_messages' }
 );
 
-module.exports = mongoose.model('ScheduledMessage', scheduledMessageSchema);
+module.exports = mongoose.model(
+	'ScheduledMessage',
+	scheduledMessageSchema,
+	MONGODB_SCHEDULED_MESSAGE_COLLECTION
+);
