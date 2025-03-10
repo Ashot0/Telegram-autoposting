@@ -2,6 +2,7 @@ const schedule = require('node-schedule');
 const moment = require('moment');
 const { CHANNEL_ID, ADMIN_ID, TIME_ZONE } = require('../config');
 const { sendMediaGroup, sendMessage, sendReply } = require('../services/Sends');
+const ScheduledMessage = require('../models/ScheduledMessage');
 
 async function scheduleMessage(message, match, mediaGroupId, bot) {
 	const [_, day, month, year, hour, minute] = match;
@@ -12,48 +13,110 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 		'YYYY-MM-DD HH:mm'
 	).utcOffset(TIME_ZONE, true);
 
+	if (sendDate.isBefore(moment())) {
+		await sendReply(message, '❌ Указанная дата уже прошла');
+		await ScheduledMessage.deleteOne({ _id: scheduledMessage._id });
+		return;
+	}
+
+	// Сохраняем сообщение в базу данных
+	const scheduledMessage = new ScheduledMessage({
+		sendDate: sendDate.toDate(),
+		messageData: {
+			chatId: message.chat.id,
+			messageId: message.message_id,
+			content: processedContent,
+			captionEntities: message.caption_entities,
+			showCaptionAboveMedia: message.show_caption_above_media,
+			hasMediaSpoiler: message.has_media_spoiler,
+			media: mediaGroupId ? mediaGroups.get(mediaGroupId) : null,
+		},
+		mediaGroupId,
+	});
+
+	await scheduledMessage.save();
+
 	await sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
 
-	const delay = sendDate.diff(moment(), 'milliseconds');
-
-	if (delay > 0) {
-		schedule.scheduleJob(sendDate.toDate(), async () => {
+	const job = schedule.scheduleJob(sendDate.toDate(), async () => {
+		try {
 			if (mediaGroupId) {
-				const groupMedia = mediaGroups.get(mediaGroupId);
-				if (groupMedia?.length > 0) {
-					await sendMediaGroup(groupMedia);
-					setTimeout(() => {
-						mediaGroups.delete(mediaGroupId);
-					}, 5000);
-				}
+				await sendMediaGroup(scheduledMessage.messageData.media);
 			} else {
-				try {
-					if (message.caption) {
-						await sendMessage(
-							message.chat.id,
-							message.message_id,
-							processedContent,
-							message.caption_entities,
-							message.show_caption_above_media,
-							message.has_media_spoiler
-						);
-					} else if (message.text) {
-						await bot.telegram.sendMessage(CHANNEL_ID, processedContent);
-					}
-
-					await bot.telegram.deleteMessage(message.chat.id, message.message_id);
-				} catch (error) {
-					console.error(`Ошибка при отправке по расписанию: ${error.message}`);
-					await sendReply(message, `❌ Ошибка: ${error.message}`);
-				}
+				await sendMessage(
+					scheduledMessage.messageData.chatId,
+					scheduledMessage.messageData.messageId,
+					scheduledMessage.messageData.content,
+					scheduledMessage.messageData.captionEntities,
+					scheduledMessage.messageData.showCaptionAboveMedia,
+					scheduledMessage.messageData.hasMediaSpoiler
+				);
 			}
-			await sendReply(message, '✅ Сообщение отправлено по расписанию!');
+
+			await bot.telegram.deleteMessage(message.chat.id, message.message_id);
+			scheduledMessage.status = 'sent';
+			await scheduledMessage.save();
+		} catch (error) {
+			console.error(`Ошибка при отправке: ${error.message}`);
+			scheduledMessage.status = 'failed';
+			await scheduledMessage.save();
+			await sendReply(message, `❌ Ошибка: ${error.message}`);
+		}
+	});
+
+	if (!job) {
+		console.error('Не удалось создать задание планировщика');
+		await ScheduledMessage.deleteOne({ _id: scheduledMessage._id });
+		await sendReply(message, '❌ Ошибка при создании задания');
+		return;
+	}
+
+	// Сохраняем jobId только если задание создано
+	scheduledMessage.jobId = job.name;
+	await scheduledMessage.save();
+}
+
+// Восстановление заданий при запуске
+async function restoreScheduledMessages(bot) {
+	const now = new Date();
+	const messages = await ScheduledMessage.find({
+		status: 'pending',
+		sendDate: { $gt: now },
+	});
+
+	if (messages.length) {
+		console.log('Восстановление заданий при запуске');
+	}
+
+	for (const msg of messages) {
+		const job = schedule.scheduleJob(msg.sendDate, async () => {
+			try {
+				if (msg.mediaGroupId) {
+					await sendMediaGroup(msg.messageData.media);
+				} else {
+					await sendMessage(
+						msg.messageData.chatId,
+						msg.messageData.messageId,
+						msg.messageData.content,
+						msg.messageData.captionEntities,
+						msg.messageData.showCaptionAboveMedia,
+						msg.messageData.hasMediaSpoiler
+					);
+				}
+
+				msg.status = 'sent';
+				await msg.save();
+			} catch (error) {
+				msg.status = 'failed';
+				await msg.save();
+			}
 		});
-	} else {
-		await sendReply(message, '❌ Указанная дата уже прошла.');
+		msg.jobId = job.name;
+		await msg.save();
 	}
 }
 
 module.exports = {
 	scheduleMessage,
+	restoreScheduledMessages,
 };

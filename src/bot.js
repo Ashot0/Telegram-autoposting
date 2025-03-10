@@ -3,6 +3,7 @@ const schedule = require('node-schedule');
 
 const { startServer } = require('./server/server');
 
+const { restoreScheduledMessages } = require('./utils/scheduler');
 const { scheduleMessage } = require('./utils/scheduler');
 const { setupCleanup } = require('./utils/cleanup');
 const { getFileId } = require('./utils/getFileId');
@@ -59,6 +60,8 @@ setupDeleteHandlers(bot, queueManager);
 
 // Отслеживание редактирования сообщений
 setupEditedMessageHandler(bot, queueManager);
+
+restoreScheduledMessages(bot);
 
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
