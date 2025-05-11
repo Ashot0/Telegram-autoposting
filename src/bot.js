@@ -12,13 +12,14 @@ const setupMessageHandlers = require('./handlers/messageHandler');
 const setupDeleteHandlers = require('./handlers/deleteHandlers');
 const setupEditedMessageHandler = require('./handlers/editedMessageHandler');
 
-const {
-	getPauseKeyboard,
-	sendPauseKeyboard,
-	registerPauseHandlers,
-	togglePause,
-	keyboardMessageId,
-} = require('./managers/pauseManager');
+// Функционал паузы временно отключён
+// const {
+// 	getPauseKeyboard,
+// 	sendPauseKeyboard,
+// 	registerPauseHandlers,
+// 	togglePause,
+// 	keyboardMessageId,
+// } = require('./managers/pauseManager');
 const QueueManager = require('./managers/queueManager');
 
 const {
@@ -37,7 +38,7 @@ const queueManager = new QueueManager();
 setupCleanup(schedule, bot, ADMIN_ID);
 
 // Регистрация обработчиков паузы
-registerPauseHandlers(bot);
+// registerPauseHandlers(bot);// Функционал паузы временно отключён
 
 // Инициализация отправки из очереди
 schedule.scheduleJob(SEND_TIMER, async () => {
@@ -65,26 +66,25 @@ restoreScheduledMessages(bot);
 
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
-	const initialMessage = await bot.telegram.sendMessage(
-		ADMIN_ID,
-		'❤️',
-		getPauseKeyboard()
-	);
-	keyboardMessageId = initialMessage.message_id;
-
-	await sendPauseKeyboard(bot, ADMIN_ID);
-
-	setTimeout(async () => {
-		try {
-			await bot.telegram.editMessageText(
-				ADMIN_ID,
-				initialMessage.message_id,
-				null,
-				' ',
-				{ reply_markup: getPauseKeyboard().reply_markup }
-			);
-		} catch (error) {
-			console.error('Ошибка редактирования:', error);
-		}
-	}, 2000);
+	// Функционал паузы временно отключён
+	// const initialMessage = await bot.telegram.sendMessage(
+	// 	ADMIN_ID,
+	// 	'❤️',
+	// 	getPauseKeyboard()
+	// );
+	// keyboardMessageId = initialMessage.message_id;
+	// await sendPauseKeyboard(bot, ADMIN_ID);
+	// setTimeout(async () => {
+	// 	try {
+	// 		await bot.telegram.editMessageText(
+	// 			ADMIN_ID,
+	// 			initialMessage.message_id,
+	// 			null,
+	// 			' ',
+	// 			{ reply_markup: getPauseKeyboard().reply_markup }
+	// 		);
+	// 	} catch (error) {
+	// 		console.error('Ошибка редактирования:', error);
+	// 	}
+	// }, 2000);
 });

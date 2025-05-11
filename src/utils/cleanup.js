@@ -4,7 +4,7 @@ const {
 } = require('../services/adminLogService');
 
 function setupCleanup(schedule, bot, adminId) {
-	schedule.scheduleJob('0 3 * * *', async () => {
+	schedule.scheduleJob('30 3 * * *', async () => {
 		console.log('[CLEAN] Запуск очистки логов');
 
 		// Получаем логи из MongoDB

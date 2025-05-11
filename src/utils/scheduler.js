@@ -1,6 +1,6 @@
 const schedule = require('node-schedule');
-const moment = require('moment');
-const { CHANNEL_ID, ADMIN_ID, TIME_ZONE } = require('../config');
+const moment = require('moment-timezone'); // Изменено на moment-timezone
+const { CHANNEL_ID, ADMIN_ID } = require('../config'); // TIME_ZONE больше не нужен
 const { sendMediaGroup, sendMessage, sendReply } = require('../services/Sends');
 const ScheduledMessage = require('../models/ScheduledMessage');
 
@@ -8,20 +8,22 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 	const [_, day, month, year, hour, minute] = match;
 	const processedContent = message.caption?.replace(match[0], '').trim() || '';
 
-	const sendDate = moment(
+	// Создаем дату в Киевском часовом поясе
+	const kievDate = moment.tz(
 		`${year}-${month}-${day} ${hour}:${minute}`,
-		'YYYY-MM-DD HH:mm'
-	).utcOffset(TIME_ZONE, true);
+		'YYYY-MM-DD HH:mm',
+		'Europe/Kiev'
+	);
 
-	if (sendDate.isBefore(moment())) {
+	// Проверяем, что дата в будущем (по Киеву)
+	if (kievDate.isBefore(moment().tz('Europe/Kiev'))) {
 		await sendReply(message, '❌ Указанная дата уже прошла');
-		await ScheduledMessage.deleteOne({ _id: scheduledMessage._id });
 		return;
 	}
 
-	// Сохраняем сообщение в базу данных
+	// Сохраняем сообщение в базу данных (в UTC)
 	const scheduledMessage = new ScheduledMessage({
-		sendDate: sendDate.toDate(),
+		sendDate: kievDate.toDate(), // сохраняем как Date (UTC)
 		messageData: {
 			chatId: message.chat.id,
 			messageId: message.message_id,
@@ -36,9 +38,14 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 
 	await scheduledMessage.save();
 
-	await sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
+	await sendReply(
+		message,
+		`⏳ Отправка сообщения в ${kievDate.format(
+			'YYYY-MM-DD HH:mm (Europe/Kiev)'
+		)}`
+	);
 
-	const job = schedule.scheduleJob(sendDate.toDate(), async () => {
+	const job = schedule.scheduleJob(kievDate.toDate(), async () => {
 		try {
 			if (mediaGroupId) {
 				await sendMediaGroup(scheduledMessage.messageData.media);
@@ -70,14 +77,14 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 		return;
 	}
 
-	// Сохраняем jobId только если задание создано
 	scheduledMessage.jobId = job.name;
 	await scheduledMessage.save();
 }
 
 // Восстановление заданий при запуске
 async function restoreScheduledMessages(bot) {
-	const now = new Date();
+	const now = moment().tz('Europe/Kiev').toDate(); // Текущее время по Киеву
+
 	const messages = await ScheduledMessage.find({
 		status: 'pending',
 		sendDate: { $gt: now },
