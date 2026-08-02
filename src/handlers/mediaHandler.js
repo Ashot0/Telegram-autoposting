@@ -1,5 +1,5 @@
 const { sendReplyWithDeleteButton } = require('../services/Sends');
-const { getFileId } = require('../utils/getFileId');
+const { getFileId, getMediaType } = require('../utils/getFileId');
 
 module.exports.processMediaGroup = async (
 	message,
@@ -11,7 +11,7 @@ module.exports.processMediaGroup = async (
 	}
 
 	queueManager.mediaGroups.get(mediaGroupId).push({
-		type: ['photo', 'video', 'document', 'audio'].find((type) => message[type]),
+		type: getMediaType(message),
 		media: getFileId(message),
 		messageId: message.message_id,
 		caption: message.caption,
@@ -30,9 +30,7 @@ module.exports.processMediaMessage = async (message, fileId, queueManager) => {
 		chatId: message.chat.id,
 		media: [
 			{
-				type: ['photo', 'video', 'document', 'audio'].find(
-					(type) => message[type]
-				),
+				type: getMediaType(message),
 				media: fileId,
 				messageId: message.message_id,
 				caption: message.caption,
@@ -53,6 +51,7 @@ module.exports.processTextMessage = async (message, queueManager) => {
 				type: 'text',
 				messageId: message.message_id,
 				text: message.text,
+				entities: message.entities,
 				caption: message.caption,
 				caption_entities: message.caption_entities,
 				show_caption_above_media: message.show_caption_above_media,

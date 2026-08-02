@@ -1,10 +1,21 @@
-const { Markup } = require('telegraf');
+const MEDIA_TYPES = [
+	'photo',
+	'video',
+	'document',
+	'audio',
+	'animation',
+	'sticker',
+	'voice',
+	'video_note',
+];
+
+function getMediaType(message) {
+	return MEDIA_TYPES.find((type) => message[type]);
+}
 
 // Функция для получения fileId медиафайлов
 function getFileId(message) {
-	const mediaType = ['photo', 'video', 'document', 'audio'].find(
-		(type) => message[type]
-	);
+	const mediaType = getMediaType(message);
 	if (!mediaType) return null;
 	const mediaContent = message[mediaType];
 	return Array.isArray(mediaContent)
@@ -14,4 +25,5 @@ function getFileId(message) {
 
 module.exports = {
 	getFileId,
+	getMediaType,
 };

@@ -7,6 +7,7 @@ const {
 	processTextMessage,
 } = require('./mediaHandler');
 const duplicateChecker = require('../services/duplicateChecker');
+const { sendReply } = require('../services/Sends');
 const { ADMIN_ID, SEND_COOLDOWN } = require('../config');
 
 module.exports = (bot, queueManager) => {
@@ -24,36 +25,40 @@ module.exports = (bot, queueManager) => {
 			return;
 		}
 
-		setTimeout(async () => {
-			const mediaGroupId = message.media_group_id;
-			const caption = message.caption || text || '';
+		setTimeout(() => {
+			(async () => {
+				const mediaGroupId = message.media_group_id;
 
-			// Проверка дубликатов
-			if (await duplicateChecker.checkMessageDuplicate(message, queueManager)) {
-				await ctx.deleteMessage();
-				return;
-			}
+				// Проверка дубликатов
+				if (await duplicateChecker.checkMessageDuplicate(message, queueManager)) {
+					await ctx.deleteMessage();
+					return;
+				}
 
-			// Обработка отложенных сообщений
-			if (processScheduledMessage(message, bot)) return;
+				// Обработка отложенных сообщений
+				if (await processScheduledMessage(message, bot)) return;
 
-			// Обработка медиагрупп
-			if (mediaGroupId) {
-				await processMediaGroup(message, mediaGroupId, queueManager);
-				return;
-			}
+				// Обработка медиагрупп
+				if (mediaGroupId) {
+					await processMediaGroup(message, mediaGroupId, queueManager);
+					return;
+				}
 
-			// Обработка одиночных медиа
-			const fileId = getFileId(message);
-			if (fileId) {
-				await processMediaMessage(message, fileId, queueManager);
-				return;
-			}
+				// Обработка одиночных медиа
+				const fileId = getFileId(message);
+				if (fileId) {
+					await processMediaMessage(message, fileId, queueManager);
+					return;
+				}
 
-			// Обработка текстовых сообщений
-			if (text) {
-				await processTextMessage(message, queueManager);
-			}
+				// Обработка текстовых сообщений
+				if (text) {
+					await processTextMessage(message, queueManager);
+				}
+			})().catch(async (error) => {
+				console.error(`[ERROR] Обработка сообщения: ${error.message}`);
+				await sendReply(message, `❌ Ошибка обработки: ${error.message}`);
+			});
 		}, SEND_COOLDOWN);
 	});
 };

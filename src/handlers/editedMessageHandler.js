@@ -1,4 +1,4 @@
-const { getFileId } = require('../utils/getFileId');
+const { getFileId, getMediaType } = require('../utils/getFileId');
 const { sendReply } = require('../services/Sends');
 const { ADMIN_ID } = require('../config');
 
@@ -26,14 +26,20 @@ module.exports = function setupEditedMessageHandler(bot, queueManager) {
 
 				task.media.forEach((mediaItem) => {
 					if (mediaItem.messageId === messageId) {
+						const fileId = getFileId(editedMessage);
+						const mediaType = getMediaType(editedMessage);
+						if (fileId) mediaItem.media = fileId;
+						if (mediaType) mediaItem.type = mediaType;
+						mediaItem.text = editedMessage.text;
+						mediaItem.entities = editedMessage.entities || [];
 						mediaItem.caption =
 							editedMessage.caption || editedMessage.text || '';
-						mediaItem.fileId = getFileId(editedMessage);
-						mediaItem.caption_entities = editedMessage.caption_entities || '';
+						mediaItem.caption_entities =
+							editedMessage.caption_entities || [];
 						mediaItem.show_caption_above_media =
-							editedMessage.show_caption_above_media || false;
+							editedMessage.show_caption_above_media ?? false;
 						mediaItem.has_media_spoiler =
-							editedMessage.has_media_spoiler || false;
+							editedMessage.has_media_spoiler ?? false;
 					}
 				});
 

@@ -19,23 +19,40 @@ async function sendMessage(
 	has_media_spoiler
 ) {
 	try {
-		await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, {
-			caption,
-			caption_entities,
-			show_caption_above_media,
-			has_media_spoiler,
-		});
+		const options = {};
+		if (caption !== undefined) {
+			options.caption = caption;
+			options.caption_entities = caption_entities;
+			options.show_caption_above_media = show_caption_above_media;
+			options.has_media_spoiler = has_media_spoiler;
+		}
+		await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, options);
 	} catch (error) {
 		throw new Error(`[ERROR] Ошибка при отправке сообщения: ${error.message}`);
 	}
 }
 
+async function sendTextMessage(text, entities) {
+	try {
+		await bot.telegram.sendMessage(CHANNEL_ID, text, { entities });
+	} catch (error) {
+		throw new Error(`[ERROR] Ошибка при отправке текста: ${error.message}`);
+	}
+}
+
 // Функция для отправки медиагруппы
-async function sendMediaGroup(media) {
+async function sendMediaGroup(media, fromChatId) {
 	if (!media || media.length === 0) {
 		throw new Error('[ERROR] Медиагруппа пуста');
 	}
 	try {
+		if (fromChatId && media.every((item) => item.messageId)) {
+			const messageIds = media
+				.map((item) => item.messageId)
+				.sort((first, second) => first - second);
+			await bot.telegram.copyMessages(CHANNEL_ID, fromChatId, messageIds);
+			return;
+		}
 		await bot.telegram.sendMediaGroup(CHANNEL_ID, media);
 	} catch (error) {
 		throw new Error(
@@ -99,6 +116,7 @@ async function sendReplyWithDeleteButton(message, text) {
 
 module.exports = {
 	sendMessage,
+	sendTextMessage,
 	sendMediaGroup,
 	sendReply,
 	sendReplyWithDeleteButton,

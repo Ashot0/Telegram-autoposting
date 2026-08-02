@@ -12,15 +12,11 @@ const setupMessageHandlers = require('./handlers/messageHandler');
 const setupDeleteHandlers = require('./handlers/deleteHandlers');
 const setupEditedMessageHandler = require('./handlers/editedMessageHandler');
 
-// Функционал паузы временно отключён
-// const {
-// 	getPauseKeyboard,
-// 	sendPauseKeyboard,
-// 	registerPauseHandlers,
-// 	togglePause,
-// 	keyboardMessageId,
-// } = require('./managers/pauseManager');
 const QueueManager = require('./managers/queueManager');
+const {
+	sendPauseKeyboard,
+	registerPauseHandlers,
+} = require('./managers/pauseManager');
 
 const {
 	sendMessage,
@@ -36,9 +32,7 @@ const queueManager = new QueueManager();
 
 // Инициализация очистки
 setupCleanup(schedule, bot, ADMIN_ID);
-
-// Регистрация обработчиков паузы
-// registerPauseHandlers(bot);// Функционал паузы временно отключён
+registerPauseHandlers(bot);
 
 // Инициализация отправки из очереди
 schedule.scheduleJob(SEND_TIMER, async () => {
@@ -66,25 +60,5 @@ restoreScheduledMessages(bot);
 
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
-	// Функционал паузы временно отключён
-	// const initialMessage = await bot.telegram.sendMessage(
-	// 	ADMIN_ID,
-	// 	'❤️',
-	// 	getPauseKeyboard()
-	// );
-	// keyboardMessageId = initialMessage.message_id;
-	// await sendPauseKeyboard(bot, ADMIN_ID);
-	// setTimeout(async () => {
-	// 	try {
-	// 		await bot.telegram.editMessageText(
-	// 			ADMIN_ID,
-	// 			initialMessage.message_id,
-	// 			null,
-	// 			' ',
-	// 			{ reply_markup: getPauseKeyboard().reply_markup }
-	// 		);
-	// 	} catch (error) {
-	// 		console.error('Ошибка редактирования:', error);
-	// 	}
-	// }, 2000);
+	await sendPauseKeyboard(bot, ADMIN_ID);
 });

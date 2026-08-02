@@ -19,11 +19,16 @@ module.exports = {
 
 		const queue = await queueManager.getQueue();
 		const isInQueue = queue.some(
-			(task) =>
-				task.media[0].messageId === message.message_id ||
+			(task) => {
+				const queuedItem = task.media[0];
+				const queuedContent = queuedItem.caption || queuedItem.text || '';
+				return queuedItem.messageId === message.message_id ||
 				(caption !== '#вагонетка_дня' &&
-					task.media[0].caption === caption &&
-					fileId === task.media[0].fileId)
+					queuedContent === caption &&
+					(fileId
+						? fileId === queuedItem.media
+						: queuedItem.type === 'text'));
+			}
 		);
 
 		if (isInQueue) {

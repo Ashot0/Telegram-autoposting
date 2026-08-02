@@ -6,6 +6,7 @@ const scheduledMessageSchema = new mongoose.Schema(
 		sendDate: { type: Date, required: true },
 		messageData: { type: mongoose.Schema.Types.Mixed, required: true },
 		mediaGroupId: String,
+		jobId: String,
 		status: {
 			type: String,
 			enum: ['pending', 'sent', 'failed'],

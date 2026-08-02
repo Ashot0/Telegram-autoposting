@@ -1,5 +1,4 @@
 const { Markup } = require('telegraf');
-const { getFileId } = require('../utils/getFileId');
 const { sendReply } = require('../services/Sends');
 const { getIsPaused } = require('./pauseManager');
 const QueueTask = require('../models/QueueTask');
@@ -15,7 +14,7 @@ class QueueManager {
 
 	async isMediaGroupDuplicate(newMedia) {
 		const newFileIds = newMedia.map((item) => item.media).sort();
-		const tasks = await QueueTask.find({});
+		const tasks = await QueueTask.find({ status: { $ne: 'sent' } });
 		return tasks.some((task) => {
 			if (!task.media || task.media.length !== newMedia.length) return false;
 			const taskFileIds = task.media.map((item) => item.media).sort();
@@ -27,6 +26,7 @@ class QueueManager {
 		return !!(await QueueTask.findOne({
 			'media.media': fileId, // Ищем по file_id
 			chatId: chatId, // Опционально, если проверка в рамках одного чата
+			status: { $ne: 'sent' },
 		}));
 	}
 
@@ -50,13 +50,17 @@ class QueueManager {
 				console.log(`[MEDIA GROUP] Медиагруппа ${mediaGroupId} пуста.`);
 				return;
 			}
+			groupMedia.sort((first, second) => first.messageId - second.messageId);
 
 			console.log(
 				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} содержит ${groupMedia.length} файлов.`
 			);
 
 			// Проверка на дубликаты
-			const exists = await QueueTask.findOne({ mediaGroupId });
+			const exists = await QueueTask.findOne({
+				mediaGroupId,
+				status: { $ne: 'sent' },
+			});
 			if (exists) {
 				console.log(`[MEDIA GROUP] Медиагруппа ${mediaGroupId} уже в очереди.`);
 				await this.cleanupMediaGroup(message, groupMedia);
@@ -73,23 +77,6 @@ class QueueManager {
 			console.log(
 				`[MEDIA GROUP] Медиагруппа ${mediaGroupId} сохранена в базу данных.`
 			);
-
-			// Удаляем сообщения из чата
-			for (const mediaItem of groupMedia) {
-				try {
-					await bot.telegram.deleteMessage(
-						message.chat.id,
-						mediaItem.messageId
-					);
-					console.log(
-						`[DELETE] Удалено сообщение медиагруппы: ${mediaItem.messageId}`
-					);
-				} catch (error) {
-					console.error(
-						`[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
-					);
-				}
-			}
 
 			// Отправляем уведомление
 			const inlineKeyboard = Markup.inlineKeyboard([
@@ -125,20 +112,44 @@ class QueueManager {
 			return;
 		}
 
-		const task = await QueueTask.findOne().sort({ createdAt: 1 });
+		const staleProcessingDate = new Date(Date.now() - 15 * 60 * 1000);
+		const task = await QueueTask.findOneAndUpdate(
+			{
+				$or: [
+					{ status: 'pending' },
+					{ status: { $exists: false } },
+					{
+						status: 'processing',
+						processingStartedAt: { $lt: staleProcessingDate },
+					},
+				],
+			},
+			{
+				$set: {
+					status: 'processing',
+					processingStartedAt: new Date(),
+				},
+			},
+			{ sort: { createdAt: 1 }, new: true }
+		);
 		if (!task) return;
+		const markTaskSent = () =>
+			QueueTask.updateOne(
+				{ _id: task._id, status: 'processing' },
+				{
+					$set: { status: 'sent' },
+					$unset: { processingStartedAt: '' },
+				}
+			);
 
 		try {
 			if (task.media.length > 1) {
-				task.media.forEach((item, index) => {
-					if (index > 0) {
-						delete item.caption;
-						delete item.caption_entities;
-						delete item.show_caption_above_media;
-					}
-				});
-				await sendMediaGroup(task.media);
-				for (const mediaItem of task.media) {
+				const orderedMedia = [...task.media].sort(
+					(first, second) => first.messageId - second.messageId
+				);
+				await sendMediaGroup(orderedMedia, task.chatId);
+				await markTaskSent();
+				for (const mediaItem of orderedMedia) {
 					try {
 						await bot.telegram.deleteMessage(task.chatId, mediaItem.messageId);
 					} catch (error) {
@@ -148,12 +159,9 @@ class QueueManager {
 			} else {
 				await sendMessage(
 					task.chatId,
-					task.media[0].messageId,
-					task.media[0].caption || '',
-					task.media[0].caption_entities,
-					task.media[0].show_caption_above_media,
-					task.media[0].has_media_spoiler
+					task.media[0].messageId
 				);
+				await markTaskSent();
 				try {
 					await bot.telegram.deleteMessage(
 						task.chatId,
@@ -164,12 +172,19 @@ class QueueManager {
 				}
 			}
 
-			await QueueTask.deleteOne({ _id: task._id });
+			await QueueTask.deleteOne({ _id: task._id, status: 'sent' });
 			sendReply(
 				ADMIN_ID,
-				`✅ Сообщение переслано! В очереди ${await QueueTask.countDocuments()}`
+				`✅ Сообщение переслано! В очереди ${await QueueTask.countDocuments({ status: { $ne: 'sent' } })}`
 			);
 		} catch (error) {
+			await QueueTask.updateOne(
+				{ _id: task._id, status: 'processing' },
+				{
+					$set: { status: 'pending' },
+					$unset: { processingStartedAt: '' },
+				}
+			);
 			console.error(`[ERROR] Отправка: ${error.message}`);
 			sendReply(ADMIN_ID, `❌ Ошибка: ${error.message}`);
 		}
@@ -178,10 +193,10 @@ class QueueManager {
 	async addToQueue(task) {
 		try {
 			const newTask = new QueueTask(task);
-			await newTask.save();
+			return await newTask.save();
 		} catch (error) {
 			console.error('Ошибка добавления в очередь:', error);
-			sendReply(ADMIN_ID, `❌ Ошибка: ${error.message}`);
+			throw error;
 		}
 	}
 
@@ -194,7 +209,9 @@ class QueueManager {
 	}
 
 	async getQueue() {
-		return await QueueTask.find({}).sort({ createdAt: 1 }).exec();
+		return await QueueTask.find({ status: { $ne: 'sent' } })
+			.sort({ createdAt: 1 })
+			.exec();
 	}
 
 	async updateTask(updatedTask) {

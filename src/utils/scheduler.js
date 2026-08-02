@@ -1,12 +1,49 @@
 const schedule = require('node-schedule');
 const moment = require('moment-timezone'); // Изменено на moment-timezone
 const { CHANNEL_ID, ADMIN_ID } = require('../config'); // TIME_ZONE больше не нужен
-const { sendMediaGroup, sendMessage, sendReply } = require('../services/Sends');
+const {
+	sendMediaGroup,
+	sendMessage,
+	sendTextMessage,
+	sendReply,
+} = require('../services/Sends');
 const ScheduledMessage = require('../models/ScheduledMessage');
 
-async function scheduleMessage(message, match, mediaGroupId, bot) {
+function removeScheduleMarker(content, entities, match) {
+	const markerStart = match.index;
+	const markerEnd = markerStart + match[0].length;
+	const withoutMarker = content.slice(0, markerStart) + content.slice(markerEnd);
+	const leadingWhitespace = withoutMarker.length - withoutMarker.trimStart().length;
+	const trimmedEnd = withoutMarker.trimEnd().length;
+
+	const adjustedEntities = (entities || [])
+		.map((entity) => {
+			const entityEnd = entity.offset + entity.length;
+			if (entity.offset < markerEnd && entityEnd > markerStart) return null;
+
+			const offset =
+				entity.offset >= markerEnd
+					? entity.offset - match[0].length
+					: entity.offset;
+			if (offset < leadingWhitespace || offset + entity.length > trimmedEnd) {
+				return null;
+			}
+			return { ...entity, offset: offset - leadingWhitespace };
+		})
+		.filter(Boolean);
+
+	return {
+		content: withoutMarker.trim(),
+		entities: adjustedEntities,
+	};
+}
+
+async function scheduleMessage(message, match, bot) {
 	const [_, day, month, year, hour, minute] = match;
-	const processedContent = message.caption?.replace(match[0], '').trim() || '';
+	const isText = typeof message.text === 'string';
+	const originalContent = message.caption || message.text || '';
+	const originalEntities = message.caption_entities || message.entities || [];
+	const processed = removeScheduleMarker(originalContent, originalEntities, match);
 
 	// Создаем дату в Киевском часовом поясе
 	const kievDate = moment.tz(
@@ -27,13 +64,12 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 		messageData: {
 			chatId: message.chat.id,
 			messageId: message.message_id,
-			content: processedContent,
-			captionEntities: message.caption_entities,
+			content: processed.content,
+			entities: processed.entities,
+			isText,
 			showCaptionAboveMedia: message.show_caption_above_media,
 			hasMediaSpoiler: message.has_media_spoiler,
-			media: mediaGroupId ? mediaGroups.get(mediaGroupId) : null,
 		},
-		mediaGroupId,
 	});
 
 	await scheduledMessage.save();
@@ -47,14 +83,17 @@ async function scheduleMessage(message, match, mediaGroupId, bot) {
 
 	const job = schedule.scheduleJob(kievDate.toDate(), async () => {
 		try {
-			if (mediaGroupId) {
-				await sendMediaGroup(scheduledMessage.messageData.media);
+			if (scheduledMessage.messageData.isText) {
+				await sendTextMessage(
+					scheduledMessage.messageData.content,
+					scheduledMessage.messageData.entities
+				);
 			} else {
 				await sendMessage(
 					scheduledMessage.messageData.chatId,
 					scheduledMessage.messageData.messageId,
 					scheduledMessage.messageData.content,
-					scheduledMessage.messageData.captionEntities,
+					scheduledMessage.messageData.entities,
 					scheduledMessage.messageData.showCaptionAboveMedia,
 					scheduledMessage.messageData.hasMediaSpoiler
 				);
@@ -99,12 +138,17 @@ async function restoreScheduledMessages(bot) {
 			try {
 				if (msg.mediaGroupId) {
 					await sendMediaGroup(msg.messageData.media);
+				} else if (msg.messageData.isText) {
+					await sendTextMessage(
+						msg.messageData.content,
+						msg.messageData.entities
+					);
 				} else {
 					await sendMessage(
 						msg.messageData.chatId,
 						msg.messageData.messageId,
 						msg.messageData.content,
-						msg.messageData.captionEntities,
+						msg.messageData.entities || msg.messageData.captionEntities,
 						msg.messageData.showCaptionAboveMedia,
 						msg.messageData.hasMediaSpoiler
 					);
@@ -124,4 +168,5 @@ async function restoreScheduledMessages(bot) {
 module.exports = {
 	scheduleMessage,
 	restoreScheduledMessages,
+	removeScheduleMarker,
 };

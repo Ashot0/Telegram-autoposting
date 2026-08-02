@@ -1,12 +1,15 @@
 const AdminLog = require('../models/AdminLogMessage');
+const mongoose = require('mongoose');
+
+const ADMIN_LOG_ID = new mongoose.Types.ObjectId('000000000000000000000001');
 
 // Добавление сообщения в лог
 async function addAdminLogMessage(messageId) {
 	try {
 		await AdminLog.updateOne(
-			{}, // Ищем первый документ (у нас будет только один)
+			{ _id: ADMIN_LOG_ID },
 			{ $push: { messages: messageId }, $set: { updatedAt: new Date() } },
-			{ upsert: true } // Создаем документ, если он не существует
+			{ upsert: true }
 		);
 	} catch (error) {
 		console.error('Error adding log message:', error);
@@ -16,8 +19,8 @@ async function addAdminLogMessage(messageId) {
 // Получение всех сообщений из лога
 async function getAdminLogMessages() {
 	try {
-		const log = await AdminLog.findOne({});
-		return log ? log.messages : [];
+		const logs = await AdminLog.find({});
+		return [...new Set(logs.flatMap((log) => log.messages || []))];
 	} catch (error) {
 		console.error('Error getting log messages:', error);
 		return [];
@@ -27,7 +30,7 @@ async function getAdminLogMessages() {
 // Очистка лога
 async function clearAdminLogMessages() {
 	try {
-		await AdminLog.updateOne(
+		await AdminLog.updateMany(
 			{},
 			{ $set: { messages: [], updatedAt: new Date() } }
 		);

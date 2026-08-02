@@ -1,5 +1,4 @@
 const { Markup } = require('telegraf');
-const { sendReply } = require('../services/Sends');
 const { ADMIN_ID } = require('../config');
 
 const state = {
@@ -12,61 +11,57 @@ function getIsPaused() {
 }
 
 function getPauseKeyboard() {
-	return getIsPaused()
-		? Markup.keyboard([['▶️ Возобновить']])
-				.resize()
-				.oneTime()
-		: Markup.keyboard([['⏸️ Пауза']])
-				.resize()
-				.oneTime();
+	return Markup.inlineKeyboard([
+		Markup.button.callback(
+			getIsPaused() ? '▶️ Возобновить' : '⏸️ Пауза',
+			'toggle_pause'
+		),
+	]);
 }
 
 async function sendPauseKeyboard(bot, adminId) {
+	const text = getIsPaused()
+		? '⏸️ Автопубликация приостановлена'
+		: '▶️ Автопубликация активна';
 	const keyboard = getPauseKeyboard();
-	try {
-		if (state.keyboardMessageId) {
+
+	if (state.keyboardMessageId) {
+		try {
 			await bot.telegram.editMessageText(
 				adminId,
 				state.keyboardMessageId,
 				null,
-				' ',
-				{ reply_markup: keyboard.reply_markup }
+				text,
+				keyboard
 			);
-		} else {
-			const msg = await bot.telegram.sendMessage(adminId, ' ', keyboard);
-			state.keyboardMessageId = msg.message_id;
-		}
-	} catch (error) {
-		if (error.description.includes('message to edit not found')) {
-			const msg = await bot.telegram.sendMessage(adminId, ' ', keyboard);
-			state.keyboardMessageId = msg.message_id;
+			return;
+		} catch (error) {
+			if (!error.description?.includes('message to edit not found')) {
+				throw error;
+			}
 		}
 	}
+
+	const message = await bot.telegram.sendMessage(adminId, text, keyboard);
+	state.keyboardMessageId = message.message_id;
 }
 
 function togglePause() {
 	state.isPaused = !state.isPaused;
-	sendReply(
-		ADMIN_ID,
-		state.isPaused ? '⏸️ Пауза активирована' : '▶️ Пауза деактивирована'
-	);
+	return state.isPaused;
 }
 
 function registerPauseHandlers(bot) {
 	bot.action('toggle_pause', async (ctx) => {
-		togglePause();
-		const keyboard = Markup.inlineKeyboard([
-			Markup.button.callback(
-				getIsPaused() ? '▶️ Возобновить' : '⏸️ Пауза',
-				'toggle_pause'
-			),
-		]);
-		try {
-			await ctx.editMessageReplyMarkup(keyboard.reply_markup);
-			await sendPauseKeyboard(bot, ctx.chat.id);
-		} catch (error) {
-			console.error('Ошибка обновления:', error);
+		if (ctx.chat.id !== ADMIN_ID) {
+			await ctx.answerCbQuery('Недостаточно прав');
+			return;
 		}
+		togglePause();
+		await ctx.answerCbQuery(
+			getIsPaused() ? 'Пауза включена' : 'Отправка возобновлена'
+		);
+		await sendPauseKeyboard(bot, ctx.chat.id);
 	});
 }
 
@@ -76,7 +71,4 @@ module.exports = {
 	togglePause,
 	registerPauseHandlers,
 	getIsPaused,
-	set keyboardMessageId(id) {
-		state.keyboardMessageId = id;
-	},
 };
