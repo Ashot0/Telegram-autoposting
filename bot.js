@@ -5,6 +5,12 @@ const punycode = require('punycode/');
 const moment = require('moment');
 const { startServer } = require('./server');
 const {
+	createMediaItem,
+	getFileId,
+	removeScheduleDate,
+	sortAndNormalizeMediaGroup,
+} = require('./mediaUtils');
+const {
 	BOT_TOKEN,
 	CHANNEL_ID,
 	ADMIN_ID,
@@ -18,11 +24,13 @@ let queue = [];
 let mediaGroups = new Map();
 let isPaused = false;
 let keyboardMessageId = null;
+let pendingScheduledDeliveries = [];
 
 // Импортируем функции отправки
 const {
 	sendMessage,
 	sendMediaGroup,
+	copyMediaGroup,
 	sendReply,
 	sendReplyWithDeleteButton,
 	getAdminLogMessages,
@@ -54,22 +62,6 @@ schedule.scheduleJob('0 3 * * *', async () => {
 	clearAdminLogMessages();
 });
 
-// Функция для получения fileId для медиафайлов
-function getFileId(message) {
-	const mediaType = ['photo', 'video', 'document', 'audio'].find(
-		(type) => message[type]
-	);
-
-	if (!mediaType) return null;
-	const mediaContent = message[mediaType];
-
-	if (Array.isArray(mediaContent)) {
-		return mediaContent[mediaContent.length - 1].file_id;
-	} else {
-		return mediaContent.file_id;
-	}
-}
-
 function isMediaGroupDuplicate(newMedia) {
 	// Собираем fileId из новой медиагруппы и сортируем для корректного сравнения
 	const newFileIds = newMedia.map((item) => item.media).sort();
@@ -83,47 +75,134 @@ function isMediaGroupDuplicate(newMedia) {
 }
 
 function getPauseKeyboard() {
-	return isPaused
-		? Markup.keyboard([['▶️ Возобновить']])
-				.resize()
-				.oneTime()
-		: Markup.keyboard([['⏸️ Пауза']])
-				.resize()
-				.oneTime();
+	return Markup.inlineKeyboard([
+		Markup.button.callback(
+			isPaused ? '▶️ Возобновить' : '⏸️ Пауза',
+			'toggle_pause'
+		),
+	]);
+}
+
+function getScheduledDate(match) {
+	const [, day, month, year, hour, minute] = match;
+	return moment(
+		`${year}-${month}-${day} ${hour}:${minute}`,
+		'YYYY-MM-DD HH:mm',
+		true
+	).utcOffset(TIME_ZONE, true);
+}
+
+async function runOrDeferScheduled(delivery, message) {
+	if (isPaused) {
+		pendingScheduledDeliveries.push(delivery);
+		await sendReply(message, '⏸️ Время отправки наступило. Публикация ожидает снятия паузы.');
+		return;
+	}
+
+	await delivery();
+}
+
+async function flushPendingScheduledDeliveries() {
+	const deliveries = pendingScheduledDeliveries;
+	pendingScheduledDeliveries = [];
+	for (const delivery of deliveries) {
+		try {
+			await delivery();
+		} catch (error) {
+			console.error(`[ERROR] Ошибка отложенной паузой отправки: ${error.message}`);
+		}
+	}
+}
+
+async function deleteSourceMessages(task) {
+	for (const mediaItem of task.media) {
+		if (!mediaItem.messageId) continue;
+		try {
+			await bot.telegram.deleteMessage(task.chatId, mediaItem.messageId);
+		} catch (error) {
+			console.error(
+				`[ERROR] Ошибка при удалении ${mediaItem.messageId}: ${error.message}`
+			);
+		}
+	}
+}
+
+async function deliverMediaTask(task) {
+	if (task.media.length > 1) {
+		await sendMediaGroup(task.media);
+	} else {
+		const item = task.media[0];
+		await sendMessage(
+			task.chatId,
+			item.messageId,
+			item.caption,
+			item.caption_entities,
+			item.show_caption_above_media,
+			item.has_media_spoiler
+		);
+	}
+	await deleteSourceMessages(task);
+}
+
+function enqueueOrScheduleMediaGroup(message, mediaGroupId, groupMedia) {
+	const task = {
+		chatId: message.chat.id,
+		media: groupMedia,
+		mediaGroupId,
+	};
+	const firstItem = groupMedia[0];
+	const scheduleData = removeScheduleDate(
+		firstItem.caption || '',
+		firstItem.caption_entities || []
+	);
+
+	if (!scheduleData) {
+		queue.push(task);
+		return false;
+	}
+
+	const sendDate = getScheduledDate(scheduleData.match);
+	if (!sendDate.isValid() || sendDate.diff(moment(), 'milliseconds') <= 0) {
+		sendReply(message, '❌ Указанная дата некорректна или уже прошла.');
+		return true;
+	}
+
+	firstItem.caption = scheduleData.text;
+	if (scheduleData.entities.length) {
+		firstItem.caption_entities = scheduleData.entities;
+	} else {
+		delete firstItem.caption_entities;
+	}
+
+	schedule.scheduleJob(sendDate.toDate(), () =>
+		runOrDeferScheduled(async () => {
+			await deliverMediaTask(task);
+			await sendReply(message, '✅ Медиагруппа отправлена по расписанию!');
+		}, message).catch((error) => {
+			console.error(`[ERROR] Ошибка отправки медиагруппы по расписанию: ${error.message}`);
+		})
+	);
+	sendReply(message, `⏳ Отправка медиагруппы в ${sendDate.format()}`);
+	return true;
 }
 
 // Функция для обработки медиагруппы
-function processMediaGroup(message, mediaGroupId, mediaArray) {
-	const mediaType = ['photo', 'video', 'document', 'audio'].find(
-		(type) => message[type]
-	);
+function processMediaGroup(message, mediaGroupId) {
+	const mediaItem = createMediaItem(message);
+	if (mediaItem) {
+		let group = mediaGroups.get(mediaGroupId);
+		if (!group) {
+			group = { chatId: message.chat.id, media: [], timer: null };
+			mediaGroups.set(mediaGroupId, group);
+		}
 
-	const fileId = getFileId(message);
-	if (fileId) {
-		mediaArray.push({
-			type: mediaType,
-			media: fileId,
-			messageId: message.message_id, // Сохраняем messageId
-			has_media_spoiler: message.has_media_spoiler || false,
-			// Telegram разрешает подпись только у первого элемента
-			caption:
-				mediaArray.length === 0
-					? message.caption || message.text || ''
-					: undefined,
-			caption_entities:
-				mediaArray.length === 0
-					? message.caption_entities || undefined
-					: undefined,
-			show_caption_above_media:
-				mediaArray.length === 0
-					? message.show_caption_above_media || false
-					: undefined,
-		});
-
-		// Даем время на поступление остальных сообщений из группы
-		setTimeout(async () => {
-			const groupMedia = mediaGroups.get(mediaGroupId);
-			if (groupMedia && groupMedia.length > 0) {
+		group.media.push(mediaItem);
+		clearTimeout(group.timer);
+		group.timer = setTimeout(async () => {
+			const pendingGroup = mediaGroups.get(mediaGroupId);
+			if (pendingGroup && pendingGroup.media.length > 0) {
+				const groupMedia = sortAndNormalizeMediaGroup(pendingGroup.media);
+				mediaGroups.delete(mediaGroupId);
 				if (isMediaGroupDuplicate(groupMedia)) {
 					// Удаляем ВСЕ сообщения медиагруппы из чата администратора
 					for (const mediaItem of groupMedia) {
@@ -142,16 +221,14 @@ function processMediaGroup(message, mediaGroupId, mediaArray) {
 						message,
 						'❌ Медиагруппа уже в очереди. Сообщения удалены.'
 					);
-					mediaGroups.delete(mediaGroupId);
 					return;
 				}
-				// Добавляем медиагруппу в очередь
-				queue.push({
-					chatId: message.chat.id,
-					media: groupMedia,
-					mediaGroupId: mediaGroupId,
-				});
-				mediaGroups.delete(mediaGroupId);
+				const wasScheduled = enqueueOrScheduleMediaGroup(
+					message,
+					mediaGroupId,
+					groupMedia
+				);
+				if (wasScheduled) return;
 				const inlineKeyboard = Markup.inlineKeyboard([
 					Markup.button.callback(
 						'Удалить медиагруппу из очереди',
@@ -202,7 +279,7 @@ async function sendMessageFromQueue() {
 				}
 			});
 
-			await sendMediaGroup(task.media);
+			await copyMediaGroup(task.chatId, task.media);
 			console.log('[QUEUE] Медиагруппа успешно отправлена!');
 
 			// Удаление исходных сообщений из чата
@@ -232,11 +309,7 @@ async function sendMessageFromQueue() {
 			//
 			await sendMessage(
 				task.chatId,
-				task.media[0].messageId,
-				task.media[0].caption || '',
-				task.media[0].caption_entities || undefined,
-				task.media[0].show_caption_above_media || undefined,
-				task.media[0].has_media_spoiler || undefined
+				task.media[0].messageId
 			);
 			console.log(
 				`[QUEUE] Сообщение ${task.media[0].messageId} успешно отправлено!`
@@ -265,16 +338,15 @@ async function sendMessageFromQueue() {
 
 async function sendPauseKeyboard(ctx) {
 	const keyboard = getPauseKeyboard();
-	const messageText = '❤️'; // Пустой пробел вместо текста
+	const messageText = '🤖 Управление рассылкой:';
 
 	try {
 		if (keyboardMessageId) {
-			await bot.telegram.editMessageText(
+			await bot.telegram.editMessageReplyMarkup(
 				ADMIN_ID,
 				keyboardMessageId,
 				null,
-				messageText,
-				{ reply_markup: keyboard.reply_markup }
+				keyboard.reply_markup
 			);
 		} else {
 			const sentMessage = await bot.telegram.sendMessage(
@@ -285,7 +357,7 @@ async function sendPauseKeyboard(ctx) {
 			keyboardMessageId = sentMessage.message_id;
 		}
 	} catch (error) {
-		if (error.description.includes('message to edit not found')) {
+		if (error.description?.includes('message to edit not found')) {
 			const sentMessage = await bot.telegram.sendMessage(
 				ADMIN_ID,
 				messageText,
@@ -325,6 +397,7 @@ bot.on('message', async (ctx) => {
 		// Обновляем основную клавиатуру
 		await sendPauseKeyboard(ctx);
 		await ctx.deleteMessage(); // Удаляем сообщение с кнопкой
+		if (!isPaused) await flushPendingScheduledDeliveries();
 		return;
 	}
 
@@ -333,6 +406,12 @@ bot.on('message', async (ctx) => {
 		const mediaGroupId = message.media_group_id;
 		const caption = message.caption || message.text || '';
 		const newMessageFileId = getFileId(message);
+
+		// Все части альбома должны попасть в один накопитель, включая часть с датой.
+		if (mediaGroupId) {
+			processMediaGroup(message, mediaGroupId);
+			return;
+		}
 
 		// Проверяем, есть ли в очереди сообщение с таким же id, текстом или изображением
 		const isMessageInQueue = queue.some((task) => {
@@ -360,48 +439,36 @@ bot.on('message', async (ctx) => {
 			return;
 		}
 
-		// Ищем дату в формате "день-месяц-год час:минута"
-		const dateRegex = /(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/;
-		const match = caption.match(dateRegex);
+		const scheduleData = removeScheduleDate(
+			caption,
+			message.caption_entities || message.entities || []
+		);
 
-		if (match) {
-			const [_, day, month, year, hour, minute] = match;
-			const processedContent = caption.replace(dateRegex, '').trim();
-
-			// Дата отправки
-
-			const sendDate = moment(
-				`${year}-${month}-${day} ${hour}:${minute}`,
-				'YYYY-MM-DD HH:mm'
-			).utcOffset(TIME_ZONE, true);
+		if (scheduleData) {
+			const processedContent = scheduleData.text;
+			const sendDate = getScheduledDate(scheduleData.match);
 
 			// Отображаемая дата
 			sendReply(message, `⏳ Отправка сообщения в ${sendDate}`);
 
 			const delay = sendDate.diff(moment(), 'milliseconds');
 
-			if (delay > 0) {
-				schedule.scheduleJob(sendDate.toDate(), async () => {
-					if (mediaGroupId) {
-						const groupMedia = mediaGroups.get(mediaGroupId);
-						if (groupMedia && groupMedia.length > 0) {
-							await sendMediaGroup(groupMedia);
-							setTimeout(() => {
-								mediaGroups.delete(mediaGroupId);
-							}, 5000);
-						}
-					} else {
+			if (sendDate.isValid() && delay > 0) {
+				schedule.scheduleJob(sendDate.toDate(), () =>
+					runOrDeferScheduled(async () => {
 						if (message.caption) {
 							await sendMessage(
 								message.chat.id,
 								message.message_id,
 								processedContent,
-								message.caption_entities || message.entities || undefined,
-								message.show_caption_above_media || undefined,
-								message.has_media_spoiler || undefined
+								scheduleData.entities.length ? scheduleData.entities : undefined,
+								message.show_caption_above_media,
+								message.has_media_spoiler
 							);
 						} else if (message.text) {
-							await bot.telegram.sendMessage(CHANNEL_ID, processedContent);
+							await bot.telegram.sendMessage(CHANNEL_ID, processedContent, {
+								entities: scheduleData.entities,
+							});
 						}
 						try {
 							await bot.telegram.deleteMessage(
@@ -417,20 +484,14 @@ bot.on('message', async (ctx) => {
 								`[ERROR] Ошибка при удалении ${message.message_id}: ${error.message}`
 							);
 						}
-					}
-					sendReply(message, '✅ Сообщение отправлено по расписанию!');
-				});
+						await sendReply(message, '✅ Сообщение отправлено по расписанию!');
+					}, message).catch((error) => {
+						console.error(`[ERROR] Ошибка отправки по расписанию: ${error.message}`);
+					})
+				);
 			} else {
-				sendReply(message, '❌ Указанная дата уже прошла.');
+				sendReply(message, '❌ Указанная дата некорректна или уже прошла.');
 			}
-		} else if (mediaGroupId) {
-			// Обработка медиагруппы
-			if (!mediaGroups.has(mediaGroupId)) {
-				mediaGroups.set(mediaGroupId, []);
-			}
-			const mediaArray = mediaGroups.get(mediaGroupId);
-			processMediaGroup(message, mediaGroupId, mediaArray);
-			return;
 		} else {
 			// Если даты нет, просто добавляем в очередь
 			queue.push({
@@ -560,19 +621,20 @@ bot.action(/delete_from_queue_media_(.+)/, async (ctx) => {
 });
 
 bot.action('toggle_pause', async (ctx) => {
+	if (ctx.from?.id !== ADMIN_ID) {
+		await ctx.answerCbQuery('Недостаточно прав.');
+		return;
+	}
+
 	isPaused = !isPaused;
-	const keyboard = Markup.inlineKeyboard([
-		Markup.button.callback(
-			isPaused ? '▶️ Возобновить' : '⏸️ Пауза',
-			'toggle_pause'
-		),
-	]);
+	const keyboard = getPauseKeyboard();
 
 	try {
 		await ctx.editMessageReplyMarkup(keyboard.reply_markup);
 		await ctx.answerCbQuery(
 			isPaused ? '⏸️ Рассылка приостановлена' : '▶️ Рассылка возобновлена'
 		);
+		if (!isPaused) await flushPendingScheduledDeliveries();
 	} catch (error) {
 		console.error('Ошибка при обновлении кнопки:', error);
 	}
@@ -582,26 +644,10 @@ startServer();
 
 bot.telegram.sendMessage(ADMIN_ID, '🤖 Бот запущен!');
 bot.launch().then(async () => {
-	// Отправляем начальное сообщение с текстом
 	const initialMessage = await bot.telegram.sendMessage(
 		ADMIN_ID,
 		'🤖 Управление рассылкой:',
 		getPauseKeyboard()
 	);
-
-	// Удаляем текст через 2 секунды
-	setTimeout(async () => {
-		try {
-			await bot.telegram.editMessageText(
-				ADMIN_ID,
-				initialMessage.message_id,
-				null,
-				' ', // Заменяем на пробел
-				{ reply_markup: getPauseKeyboard().reply_markup }
-			);
-			keyboardMessageId = initialMessage.message_id;
-		} catch (error) {
-			console.error('Ошибка редактирования:', error);
-		}
-	}, 2000);
+	keyboardMessageId = initialMessage.message_id;
 });

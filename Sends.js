@@ -16,12 +16,15 @@ async function sendMessage(
   has_media_spoiler
 ) {
   try {
-    await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, {
-      caption,
-      caption_entities,
-      show_caption_above_media,
-      has_media_spoiler,
-    });
+    const options = {};
+    if (caption !== undefined) options.caption = caption;
+    if (caption_entities !== undefined) options.caption_entities = caption_entities;
+    if (show_caption_above_media !== undefined) {
+      options.show_caption_above_media = show_caption_above_media;
+    }
+    if (has_media_spoiler !== undefined) options.has_media_spoiler = has_media_spoiler;
+
+    await bot.telegram.copyMessage(CHANNEL_ID, chatId, messageId, options);
   } catch (error) {
     throw new Error(`[ERROR] Ошибка при отправке сообщения: ${error.message}`);
   }
@@ -33,10 +36,27 @@ async function sendMediaGroup(media) {
     throw new Error("[ERROR] Медиагруппа пуста");
   }
   try {
-    await bot.telegram.sendMediaGroup(CHANNEL_ID, media);
+    const telegramMedia = media.map(({ messageId, ...item }) => item);
+    await bot.telegram.sendMediaGroup(CHANNEL_ID, telegramMedia);
   } catch (error) {
     throw new Error(
       `[ERROR] Ошибка при отправке медиагруппы: ${error.message}`
+    );
+  }
+}
+
+async function copyMediaGroup(chatId, media) {
+  if (!media || media.length === 0) {
+    throw new Error('[ERROR] Медиагруппа пуста');
+  }
+  try {
+    const messageIds = media
+      .map((item) => item.messageId)
+      .sort((a, b) => a - b);
+    await bot.telegram.copyMessages(CHANNEL_ID, chatId, messageIds);
+  } catch (error) {
+    throw new Error(
+      `[ERROR] Ошибка при копировании медиагруппы: ${error.message}`
     );
   }
 }
@@ -107,6 +127,7 @@ function clearAdminLogMessages() {
 module.exports = {
   sendMessage,
   sendMediaGroup,
+  copyMediaGroup,
   sendReply,
   sendReplyWithDeleteButton,
   getAdminLogMessages,
